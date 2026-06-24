@@ -63,11 +63,18 @@ def run_kane_verification(ac: dict) -> dict:
              "--timeout", "180", "--max-steps", "30"],
             capture_output=True, text=True, timeout=210
         )
+        # Debug: print raw output to understand what kane-cli emits
+        print(f"  [kane-debug] {ac['id']} exit={result.returncode}")
+        print(f"  [kane-debug] stdout({len(result.stdout)}): {result.stdout[:300]!r}")
+        print(f"  [kane-debug] stderr({len(result.stderr)}): {result.stderr[:300]!r}")
+
         # Parse NDJSON output — terminal event is type: "run_end"
         status = "failed"
         one_liner = ""
         steps = []
-        for line in result.stdout.splitlines():
+        # Check both stdout and stderr for NDJSON (kane-cli may mix them)
+        combined_output = result.stdout + result.stderr
+        for line in combined_output.splitlines():
             line = line.strip()
             if not line:
                 continue
