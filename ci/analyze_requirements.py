@@ -68,6 +68,7 @@ def run_kane_verification(ac: dict) -> dict:
         one_liner = ""
         steps = []
         combined_output = result.stdout + result.stderr
+        print(f"  [kane-debug] {ac['id']} exit={result.returncode} stdout_lines={len(result.stdout.splitlines())} last={result.stdout.strip()[-200:]!r}")
         for line in combined_output.splitlines():
             line = line.strip()
             if not line:
