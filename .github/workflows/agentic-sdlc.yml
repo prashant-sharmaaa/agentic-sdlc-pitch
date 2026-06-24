@@ -92,9 +92,14 @@ jobs:
 
       - name: Configure Kane CLI
         if: steps.kane-cache.outputs.cache-hit != 'true' && env.DEMO_MODE != 'true'
+        env:
+          LT_USERNAME:    ${{ secrets.LT_USERNAME }}
+          LT_ACCESS_KEY:  ${{ secrets.LT_ACCESS_KEY }}
         run: |
+          kane-cli login --username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY"
           kane-cli config project ${{ secrets.KANE_PROJECT_ID }}
           kane-cli config folder ${{ secrets.KANE_FOLDER_ID }}
+          kane-cli whoami
 
       # DEMO MODE — loads pre-seeded results in <5s, no live browser calls
       - name: "KaneAI · DEMO MODE (pre-generated results)"

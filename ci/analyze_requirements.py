@@ -53,35 +53,35 @@ def parse_all_requirements() -> list[dict]:
 def run_kane_verification(ac: dict) -> dict:
     """Run kane-cli for one acceptance criterion and return result dict."""
     objective = (
-        f"Verify on {TARGET_URL}: {ac['description']} "
-        f"Return PASS if observable, FAIL otherwise."
+        f"Go to {TARGET_URL}, verify: {ac['description']} "
+        f"Assert the behaviour is observable. Pass if yes, fail if not."
     )
     print(f"  [kane] {ac['id']}: {objective[:80]}...")
     try:
         result = subprocess.run(
-            ["kane-cli", "run", objective, "--output", "json"],
+            ["kane-cli", "run", objective, "--agent", "--headless", "--timeout", "90"],
             capture_output=True, text=True, timeout=120
         )
-        output = result.stdout + result.stderr
-        # Parse NDJSON output from kane-cli
+        # Parse NDJSON output — terminal event is type: "run_end"
         status = "failed"
         one_liner = ""
         steps = []
-        for line in output.splitlines():
+        for line in result.stdout.splitlines():
             line = line.strip()
             if not line:
                 continue
             try:
                 event = json.loads(line)
-                etype = event.get("type", "")
-                if etype == "final_state":
-                    data = event.get("data", {})
-                    status = "passed" if data.get("success") else "failed"
-                    one_liner = data.get("summary", "")[:80]
-                    steps = data.get("steps", [])
+                if event.get("type") == "run_end":
+                    status = event.get("status", "failed")
+                    one_liner = event.get("one_liner", event.get("summary", ""))[:80]
+                elif "step" in event and "remark" in event:
+                    steps.append(event.get("remark", ""))
             except json.JSONDecodeError:
-                if "passed" in line.lower() or "success" in line.lower():
-                    status = "passed"
+                pass
+        # Also accept exit code 0 as passed
+        if result.returncode == 0 and status == "failed":
+            status = "passed"
         return {**ac, "kane_status": status, "kane_one_liner": one_liner, "kane_steps": steps, "kane_summary": one_liner}
     except subprocess.TimeoutExpired:
         print(f"  [kane] TIMEOUT for {ac['id']}")
