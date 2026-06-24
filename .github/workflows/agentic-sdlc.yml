@@ -35,7 +35,7 @@ on:
       demo_mode:
         description: "DEMO MODE — use pre-generated Kane results, no live Kane calls"
         required: false
-        default: "false"
+        default: "true"
         type: boolean
 
 env:

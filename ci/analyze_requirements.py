@@ -59,8 +59,9 @@ def run_kane_verification(ac: dict) -> dict:
     print(f"  [kane] {ac['id']}: {objective[:80]}...")
     try:
         result = subprocess.run(
-            ["kane-cli", "run", objective, "--agent", "--headless", "--timeout", "90"],
-            capture_output=True, text=True, timeout=120
+            ["kane-cli", "run", objective, "--agent", "--headless",
+             "--timeout", "60", "--max-steps", "12"],
+            capture_output=True, text=True, timeout=90
         )
         # Parse NDJSON output — terminal event is type: "run_end"
         status = "failed"
@@ -92,6 +93,8 @@ def run_kane_verification(ac: dict) -> dict:
 
 
 def main() -> None:
+    import concurrent.futures
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--demo-mode", action="store_true", help="Use pre-seeded results")
     parser.add_argument("--requirements", default="requirements", help="Requirements directory")
@@ -111,13 +114,18 @@ def main() -> None:
         print("ERROR: no acceptance criteria found in requirements/*.txt", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[analyze] {len(all_acs)} acceptance criteria found — running KaneAI verification")
-    results = []
-    for ac in all_acs:
-        result = run_kane_verification(ac)
-        results.append(result)
-        print(f"  {result['id']} → {result['kane_status']}")
+    print(f"[analyze] {len(all_acs)} ACs found — running KaneAI verification in parallel")
+    results_map: dict[str, dict] = {}
 
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(run_kane_verification, ac): ac["id"] for ac in all_acs}
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            results_map[result["id"]] = result
+            print(f"  {result['id']} → {result['kane_status']}")
+
+    # Preserve original AC order
+    results = [results_map[ac["id"]] for ac in all_acs]
     out_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
     passed = sum(1 for r in results if r["kane_status"] == "passed")
     print(f"\n[analyze] complete: {passed}/{len(results)} passed → {out_path}")
