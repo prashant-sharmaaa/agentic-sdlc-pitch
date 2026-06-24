@@ -75,6 +75,22 @@ jobs:
           key: pip-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
           restore-keys: pip-${{ runner.os }}-
 
+      # Force-clear Kane cache on full manual runs so fresh verification always runs
+      - name: Clear Kane cache (full_run + workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch' && inputs.full_run == true && env.DEMO_MODE != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CACHE_KEY="kane-results-${{ hashFiles('requirements/*.txt') }}"
+          CACHE_ID=$(gh api /repos/${{ github.repository }}/actions/caches \
+            --jq ".actions_caches[] | select(.key==\"$CACHE_KEY\") | .id" 2>/dev/null || echo "")
+          if [ -n "$CACHE_ID" ]; then
+            gh api --method DELETE /repos/${{ github.repository }}/actions/caches/$CACHE_ID
+            echo "Kane cache cleared (id=$CACHE_ID)"
+          else
+            echo "No Kane cache found — will run fresh"
+          fi
+
       # If requirements are unchanged, reuse cached Kane results — skip live calls
       - name: Cache Kane results (by requirements hash)
         id: kane-cache
@@ -90,15 +106,15 @@ jobs:
         if: steps.kane-cache.outputs.cache-hit != 'true' && env.DEMO_MODE != 'true'
         run: npm install -g @testmuai/kane-cli
 
-      - name: Configure Kane CLI
+      - name: Configure Kane CLI (project=kane-agentic, folder=autonomusTCs)
         if: steps.kane-cache.outputs.cache-hit != 'true' && env.DEMO_MODE != 'true'
         env:
           LT_USERNAME:    ${{ secrets.LT_USERNAME }}
           LT_ACCESS_KEY:  ${{ secrets.LT_ACCESS_KEY }}
         run: |
           kane-cli login --username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY"
-          kane-cli config project ${{ secrets.KANE_PROJECT_ID }}
-          kane-cli config folder ${{ secrets.KANE_FOLDER_ID }}
+          kane-cli config project ${{ secrets.KANE_PROJECT_ID }}   # kane-agentic
+          kane-cli config folder ${{ secrets.KANE_FOLDER_ID }}     # autonomusTCs
           kane-cli whoami
 
       # DEMO MODE — loads pre-seeded results in <5s, no live browser calls
