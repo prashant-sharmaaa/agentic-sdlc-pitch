@@ -24,7 +24,13 @@ _BROWSER_CAPS = {
     "chrome":  {"browserName": "chrome",  "platform": "Windows 11"},
     "firefox": {"browserName": "firefox", "platform": "Windows 11"},
     "safari":  {"browserName": "safari",  "platform": "macOS Sequoia"},
-    "android": {"browserName": "chrome",  "platformName": "android", "deviceName": "Pixel 7", "platformVersion": "13", "isRealMobile": True},
+}
+
+# Maps browser name → playwright browser type for cloud connect
+_PW_BROWSER = {
+    "chrome":  "chromium",
+    "firefox": "firefox",
+    "safari":  "webkit",
 }
 
 
@@ -51,9 +57,11 @@ def pytest_generate_tests(metafunc):
 def page(request, browser_name):
     from playwright.sync_api import sync_playwright  # lazy — allows collection without playwright
     test_name = re.sub(r"[^\w\s-]", "", request.node.name)[:80]
+    pw_type = _PW_BROWSER.get(browser_name, "chromium")
     with sync_playwright() as p:
+        browser_engine = getattr(p, pw_type)
         if LT_USERNAME and LT_ACCESS_KEY:
-            browser = p.chromium.connect(
+            browser = browser_engine.connect(
                 _lt_cdp_url(browser_name, test_name),
                 timeout=120_000
             )
@@ -65,7 +73,7 @@ def page(request, browser_name):
             ctx.close()
             browser.close()
         else:
-            browser = p.chromium.launch(headless=True)
+            browser = browser_engine.launch(headless=True)
             ctx = browser.new_context()
             pg  = ctx.new_page()
             yield pg

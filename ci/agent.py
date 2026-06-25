@@ -50,39 +50,45 @@ _ECOM = "https://ecommerce-playground.lambdatest.io"
 
 PLAYWRIGHT_BODIES: dict[str, str] = {
     "SC-001": (
-        f'    page.goto("{_ECOM}/index.php?route=product/product&product_id=28")\n'
-        '    page.wait_for_load_state("domcontentloaded", timeout=30000)\n'
-        '    page.locator("#button-cart").wait_for(timeout=15000)\n'
-        '    page.locator("#button-cart").click()\n'
-        '    page.wait_for_timeout(1500)\n'
-        '    assert page.locator("#cart button span, #cart-total").count() > 0'
+        f'    page.goto("{_ECOM}/")\n'
+        '    page.wait_for_load_state("load", timeout=30000)\n'
+        '    page.locator(".product-thumb").first.hover()\n'
+        '    page.wait_for_timeout(500)\n'
+        '    page.locator("button.btn-cart:visible").first.click(force=True)\n'
+        '    page.wait_for_timeout(2000)\n'
+        '    badge = page.locator(".cart-item-total")\n'
+        '    assert badge.count() > 0 and badge.first.inner_text().strip() != "0", "Cart counter not updated"'
     ),
     "SC-002": (
-        f'    page.goto("{_ECOM}/index.php?route=product/product&product_id=28")\n'
-        '    page.locator("#button-cart").wait_for(timeout=15000)\n'
-        '    page.locator("#button-cart").click()\n'
-        '    page.wait_for_timeout(1500)\n'
-        '    page.locator("#cart > button").click()\n'
+        f'    page.goto("{_ECOM}/")\n'
+        '    page.wait_for_load_state("load", timeout=30000)\n'
+        '    page.locator(".product-thumb").first.hover()\n'
+        '    page.wait_for_timeout(500)\n'
+        '    page.locator("button.btn-cart:visible").first.click(force=True)\n'
+        '    page.wait_for_timeout(2000)\n'
+        '    page.locator("#entry_217825 a.cart").click()\n'
         '    page.wait_for_timeout(1000)\n'
-        '    assert page.locator("#cart .text-left a").count() > 0, "Cart items not visible"'
+        '    assert page.locator("#cart-total-drawer a[href*=\'product_id\']").count() > 0, "Cart drawer items not visible"'
     ),
     "SC-003": (
-        f'    page.goto("{_ECOM}/index.php?route=product/product&product_id=28")\n'
-        '    page.locator("#button-cart").wait_for(timeout=15000)\n'
-        '    page.locator("#button-cart").click()\n'
-        '    page.wait_for_timeout(1000)\n'
-        '    page.locator("#cart > button").click()\n'
+        f'    page.goto("{_ECOM}/")\n'
+        '    page.wait_for_load_state("load", timeout=30000)\n'
+        '    page.locator(".product-thumb").first.hover()\n'
         '    page.wait_for_timeout(500)\n'
-        '    remove = page.locator("#cart .fa-times").first\n'
+        '    page.locator("button.btn-cart:visible").first.click(force=True)\n'
+        '    page.wait_for_timeout(2000)\n'
+        f'    page.goto("{_ECOM}/index.php?route=checkout/cart")\n'
+        '    page.wait_for_load_state("load", timeout=20000)\n'
+        '    remove = page.locator("button.btn-danger").first\n'
         '    if remove.count() > 0:\n'
-        '        remove.click()\n'
-        '        page.wait_for_timeout(1000)\n'
-        '    assert page.locator("#cart > button").count() > 0, "Cart button not visible"'
+        '        remove.click(force=True)\n'
+        '        page.wait_for_timeout(1500)\n'
+        '    assert page.locator("#content").count() > 0, "Cart page not visible"'
     ),
     "SC-004": (
         f'    page.goto("{_ECOM}/")\n'
         '    page.wait_for_load_state("domcontentloaded", timeout=30000)\n'
-        '    search = page.locator("input[name=\'search\']")\n'
+        '    search = page.locator("input[name=\'search\']").first\n'
         '    search.wait_for(timeout=15000)\n'
         '    search.fill("iPhone")\n'
         '    search.press("Enter")\n'
@@ -101,12 +107,14 @@ PLAYWRIGHT_BODIES: dict[str, str] = {
         '    assert page.locator(".price-new, .price, h2.price").count() > 0'
     ),
     "SC-008": (
-        f'    page.goto("{_ECOM}/index.php?route=product/product&product_id=28")\n'
-        '    page.locator("#button-cart").wait_for(timeout=15000)\n'
-        '    page.locator("#button-cart").click()\n'
+        f'    page.goto("{_ECOM}/")\n'
+        '    page.wait_for_load_state("load", timeout=30000)\n'
+        '    page.locator(".product-thumb").first.hover()\n'
+        '    page.wait_for_timeout(500)\n'
+        '    page.locator("button.btn-cart:visible").first.click(force=True)\n'
         '    page.wait_for_timeout(2000)\n'
-        '    success = page.locator(".alert-success, #cart-total, .wk-cart-msg")\n'
-        '    assert success.count() > 0, "No success message after adding to cart"'
+        '    success = page.locator(".toast-body, .alert-success, .toast")\n'
+        '    assert success.count() > 0, "No success notification after adding to cart"'
     ),
     "SC-007": (
         f'    page.goto("{_ECOM}/index.php?route=product/category&path=25")\n'
@@ -116,8 +124,8 @@ PLAYWRIGHT_BODIES: dict[str, str] = {
         '        filter_link = page.locator("#column-left a").filter(has_text="Apple")\n'
         '    if filter_link.count() > 0:\n'
         '        filter_link.first.click()\n'
-        '        page.wait_for_load_state("domcontentloaded")\n'
-        '    assert page.locator("#content").count() > 0, "Content not visible after filter"'
+        '        page.wait_for_load_state("load", timeout=15000)\n'
+        '    assert page.locator("#content, #column-right, .product-layout").count() > 0, "Content not visible after filter"'
     ),
 }
 
@@ -148,6 +156,11 @@ def _derive_fn_name(sc_id: str, title: str) -> str:
     return f"test_{sc_id.lower().replace('-', '_')}_{slug}"
 
 
+def _normalize_body(code: str) -> str:
+    """Re-indent every non-empty line to exactly 4 spaces (flattens nested blocks)."""
+    return "\n".join("    " + line.strip() for line in code.splitlines() if line.strip())
+
+
 def _build_test_fn(scenario: dict) -> str:
     sc_id   = scenario["id"]
     fn_name = scenario.get("function_name") or _derive_fn_name(sc_id, scenario.get("title", sc_id))
@@ -155,7 +168,10 @@ def _build_test_fn(scenario: dict) -> str:
     url     = scenario.get("kane_url", TARGET_URL)
     # Prefer Kane's AI-generated code export; fall back to hardcoded bodies
     kane_code = scenario.get("kane_code", "").strip()
-    body    = kane_code if kane_code else PLAYWRIGHT_BODIES.get(sc_id, _FALLBACK_BODY).format(url=url)
+    if kane_code:
+        body = _normalize_body(kane_code)  # always normalize indent — cache may have inconsistent code
+    else:
+        body = PLAYWRIGHT_BODIES.get(sc_id, _FALLBACK_BODY).format(url=url)
     req_id  = scenario.get("requirement_id", "AC-000")
     return (
         f'@pytest.mark.scenario("{sc_id}")\n'

@@ -77,9 +77,9 @@ jobs:
           key: pip-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
           restore-keys: pip-${{ runner.os }}-
 
-      # Force-clear Kane cache on full manual runs so fresh verification always runs
+      # Always clear Kane cache on push so stale live results never poison the pipeline
       - name: Clear Kane cache (on push or full manual run)
-        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.full_run == true)) && env.DEMO_MODE != 'true'
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.full_run == true && env.DEMO_MODE != 'true')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

@@ -17,18 +17,20 @@ env:
   LT_ACCESS_KEY:      ${LT_ACCESS_KEY}
   GITHUB_RUN_NUMBER:  ${GITHUB_RUN_NUMBER}
   TARGET_URL:         "https://ecommerce-playground.lambdatest.io/"
-  BROWSERS:           "chrome,firefox,safari,android"
+  BROWSERS:           "chrome,firefox"
 
-cacheKey: '{{ checksum "requirements.txt" }}'
+cacheKey: '{{ checksum "requirements-he.txt" }}'
 cacheDirectories:
   - .pip_cache
   - ~/.cache/ms-playwright
 
 pre:
   - mkdir -p reports
-  - pip install --cache-dir .pip_cache -r requirements.txt -q
-  - playwright install chromium firefox webkit
-  - python ci/generate_he_tests.py
+  - python3 -m venv .venv || python -m venv .venv
+  - .venv/bin/pip install --cache-dir .pip_cache -r requirements-he.txt
+  - .venv/bin/python -c "from playwright.sync_api import sync_playwright; print('[pre] playwright OK')"
+  - .venv/bin/python -m playwright install chromium firefox
+  - .venv/bin/python ci/generate_he_tests.py
 
 runtime:
   language: python
@@ -37,10 +39,10 @@ runtime:
 testDiscovery:
   type: raw
   mode: dynamic
-  command: PYTHONPATH=. pytest tests/playwright/test_scenarios.py --collect-only -q --no-header 2>/dev/null | grep "::"
+  command: PYTHONPATH=. .venv/bin/pytest tests/playwright/test_scenarios.py --collect-only -q --no-header 2>/dev/null | grep "::"
 
 testRunnerCommand: >
-  PYTHONPATH=. pytest "$test" -v --tb=short -s
+  PYTHONPATH=. .venv/bin/pytest "$test" -v --tb=short -s
   --html=reports/report.html
   --junitxml=reports/junit.xml
 

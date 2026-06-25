@@ -1,0 +1,9 @@
+# Minimal requirements for HyperExecute test execution.
+# The orchestrator (ci/agent.py) uses requirements.txt which has mcp/anthropic.
+# HE VMs need playwright + pytest + httpx (agent.py imports httpx at module level).
+playwright>=1.44
+pytest>=8.2
+pytest-html>=4.1
+pytest-metadata>=3.1
+pytest-asyncio>=0.23
+httpx>=0.27
