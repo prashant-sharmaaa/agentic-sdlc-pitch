@@ -36,6 +36,7 @@ testDiscovery:
 
 testRunnerCommand: >
   PYTHONPATH=. python3 -m pytest "$test" -v --tb=short -s
+  -p no:playwright
   --html=reports/report.html
   --junitxml=reports/junit.xml
 
