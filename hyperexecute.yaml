@@ -32,7 +32,7 @@ pre:
 testDiscovery:
   type: raw
   mode: dynamic
-  command: PYTHONPATH=. python3 -m pytest tests/playwright/test_scenarios.py --collect-only -q --no-header | grep "::"
+  command: python3 ci/list_tests.py
 
 testRunnerCommand: >
   PYTHONPATH=. python3 -m pytest "$test" -v --tb=short -s
