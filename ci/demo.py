@@ -45,12 +45,12 @@ def print_matrix(cache: dict):
     print("=" * w)
 
     # Table
-    print(f"\n{'AC':<8} {'Scenario':<38} {'SC':<8} {'TC':<12} {'Result'}")
+    print(f"\n{'AC':<8} {'Scenario':<46} {'TC':<12} {'Result'}")
     print("-" * w)
     for r in rows:
-        sc_name = r.get("sc_name", r["sc_id"])[:36]
+        sc_name = r.get("sc_name", r["sc_id"])[:44]
         tc = r.get("tc_internal", "pending")
-        print(f"{r['ac_id']:<8} {sc_name:<38} {r['sc_id']:<8} {tc:<12} {r['overall']} {r['status']}")
+        print(f"{r['ac_id']:<8} {sc_name:<46} {tc:<12} {r['overall']} {r['status']}")
 
     # Summary bar
     s = summary

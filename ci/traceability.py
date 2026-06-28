@@ -136,22 +136,22 @@ def write_markdown(matrix: dict) -> str:
         "# Agentic SDLC — Traceability Matrix",
         f"\n_Generated: {ts}_\n",
         "## Requirement → Scenario → Test Case → Result\n",
-        "| AC | Acceptance Criterion | SC | Scenario Name | TM Test Case | Status | Result | RCA |",
-        "| -- | -------------------- | -- | ------------- | ------------ | ------ | ------ | --- |",
+        "| AC | Acceptance Criterion | Scenario Name | TM Test Case | Status | Result | RCA |",
+        "| -- | -------------------- | ------------- | ------------ | ------ | ------ | --- |",
     ]
     for r in rows:
+        tm_id   = r.get("tm_id", "")
         sc_name = r.get("sc_name", r["sc_id"])
-        # SC column: hyperlink to TM test case if available, else plain text
-        tm_id = r.get("tm_id", "")
-        sc_cell = f"[{r['sc_id']}]({TM_PROJECT_URL}/{tm_id})" if tm_id else r["sc_id"]
-        # TM TC column: hyperlinked label or pending
-        tc_cell = r.get("tc_link") or ("pending" if not r.get("tm_id") else r["tc_internal"])
+        # Scenario Name: hyperlink to TM test case page if available
+        sc_cell = f"[{sc_name[:45]}]({TM_PROJECT_URL}/{tm_id})" if tm_id else sc_name[:45]
+        # TM TC column: hyperlinked TC-NNNNN label or pending
+        tc_cell = r.get("tc_link") or ("pending" if not tm_id else r["tc_internal"])
         # RCA: prefer LT AI RCA, fall back to kane-cli failure detail
         rca_val = r.get("rca") or (r.get("failure_detail", "")[:80] if r["status"] == "failed" else "")
         rca_snippet = (rca_val[:60] + "…") if len(rca_val) > 60 else (rca_val or "—")
         lines.append(
-            f"| {r['ac_id']} | {r['criterion'][:55]} | {sc_cell} "
-            f"| {sc_name[:45]} | {tc_cell} | {r['status']} | {r['overall']} | {rca_snippet} |"
+            f"| {r['ac_id']} | {r['criterion'][:55]} "
+            f"| {sc_cell} | {tc_cell} | {r['status']} | {r['overall']} | {rca_snippet} |"
         )
 
     lines += [
