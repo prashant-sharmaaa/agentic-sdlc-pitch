@@ -63,11 +63,11 @@ else:
         },
         {
             "id":   "SC-003",
-            "name": "SC-003: Remove item updates cart total",
+            "name": "SC-003: Remove item shows empty cart message",
             "objective": (
                 "Go to https://automationexercise.com/, add an item to the cart, "
                 "navigate to the cart page, remove the item using the X button, "
-                "and verify the cart is now empty"
+                "and verify the empty cart message text is displayed on the page"
             ),
         },
         {
