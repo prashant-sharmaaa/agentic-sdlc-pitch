@@ -180,6 +180,49 @@ def _summarize(raw: str, sc_id: str) -> str:
         return raw[:300]
 
 
+# ── Flow 2: update run_history with actual HE results ────────────────────────
+
+HISTORY_FILE = CI_DIR / "run_history.json"
+
+def update_history_from_he(build_name: str, flow: str = "flow2", log=None) -> dict:
+    """
+    Fetch HE session results for a build and overwrite run_history.json with
+    actual HE pass/fail — so the traceability matrix reflects execution truth,
+    not just kane-cli authoring status.
+
+    Called by flow2_pipeline after Phase 3 (HE job completes).
+    """
+    if not LT_ACCESS_KEY:
+        return {}
+
+    sessions = fetch_sessions_for_build(build_name, log)
+    if not sessions:
+        msg = f"[rca] No sessions found for build '{build_name}' — run_history unchanged"
+        print(msg) if not log else log.warning(msg)
+        return {}
+
+    history = json.loads(HISTORY_FILE.read_text()) if HISTORY_FILE.exists() else {}
+
+    updated = {}
+    for s in sessions:
+        sc_id = _session_to_sc_id(s["name"])
+        if not sc_id:
+            continue
+        he_status = "passed" if s["status"] == "passed" else "failed"
+        if sc_id in history:
+            history[sc_id]["status"]       = he_status
+            history[sc_id]["flow"]         = flow
+            history[sc_id]["session_link"] = s.get("session_link", "")
+        updated[sc_id] = he_status
+
+    if updated:
+        HISTORY_FILE.write_text(json.dumps(history, indent=2))
+        msg = f"[rca] Updated run_history with HE results: {updated}"
+        print(msg) if not log else log.info(msg)
+
+    return updated
+
+
 # ── Main public function ──────────────────────────────────────────────────────
 
 def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None) -> dict:

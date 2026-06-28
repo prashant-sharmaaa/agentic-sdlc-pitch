@@ -31,7 +31,7 @@ log = get_logger("flow1")
 LT_USERNAME   = os.environ.get("LT_USERNAME", "gagandeepb")
 LT_ACCESS_KEY = os.environ.get("LT_ACCESS_KEY")
 BASE_URL      = "https://automationexercise.com/"
-KANE_TIMEOUT  = 180
+KANE_TIMEOUT  = 300
 KANE_DIR      = Path("tests/playwright/kane")
 PROJECT_ROOT  = Path(__file__).parent.parent   # ci/ → project root
 HE_BINARY     = PROJECT_ROOT / "hyperexecute"
@@ -114,10 +114,10 @@ def run_kane(sc):
         "--timeout", str(KANE_TIMEOUT),
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=KANE_TIMEOUT + 30)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=KANE_TIMEOUT + 60)
     except subprocess.TimeoutExpired:
-        log.failure(sc_id, "TIMEOUT", detail=f"Exceeded {KANE_TIMEOUT + 30}s")
-        return None, None, f"Timeout after {KANE_TIMEOUT + 30}s"
+        log.failure(sc_id, "TIMEOUT", detail=f"Exceeded {KANE_TIMEOUT + 60}s")
+        return None, None, f"Timeout after {KANE_TIMEOUT + 60}s"
 
     # Parse both stdout and stderr for NDJSON events
     combined = result.stdout + "\n" + result.stderr
@@ -145,12 +145,22 @@ def run_kane(sc):
 
 
 def phase1_run_objectives(objectives=None):
-    log.phase("PHASE 1 — Running kane-cli objectives")
-    results = []
-    for sc in (objectives or SC_OBJECTIVES):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    log.phase("PHASE 1 — Running kane-cli objectives (parallel, max_workers=3)")
+    objs = list(objectives or SC_OBJECTIVES)
+    results = [None] * len(objs)
+
+    def _run(idx, sc):
         status, session_dir, failure_detail = run_kane(sc)
-        results.append({**sc, "status": status, "session_dir": session_dir,
-                        "failure_detail": failure_detail or ""})
+        return idx, {**sc, "status": status, "session_dir": session_dir,
+                     "failure_detail": failure_detail or ""}
+
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futures = {ex.submit(_run, i, sc): i for i, sc in enumerate(objs)}
+        for fut in as_completed(futures):
+            idx, entry = fut.result()
+            results[idx] = entry
+
     passed = sum(1 for r in results if r["status"] == "passed")
     log.info(f"{passed}/{len(results)} passed")
     return results

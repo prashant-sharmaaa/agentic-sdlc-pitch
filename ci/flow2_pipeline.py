@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from pipeline_logger import get_logger
 from self_heal import load_history, save_history, heal_objectives
 from traceability import record_he_job, record_tm_test_cases_with_sc, run_traceability
-from rca import run_rca
+from rca import run_rca, update_history_from_he
 
 log = get_logger("flow2")
 
@@ -50,7 +50,7 @@ HE_API        = "https://test-manager-api.lambdatest.com/api/atm/v1/hyperexecute
 PROJECT_ID    = "01KVXJ82AKT83GWJNFZTQVMNRQ"   # kane-agentic
 ENVIRONMENT_ID = 282603                           # Windows Config — Win10, Firefox 150, desktop web
 BASE_URL      = "https://automationexercise.com/"
-KANE_TIMEOUT  = 180   # seconds per kane-cli run
+KANE_TIMEOUT  = 300   # seconds per kane-cli run
 BUILD_NAME    = f"Agentic SDLC | KaneAI Flow2 | {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}"
 
 # ── SC Objectives — loaded from Claude-generated objectives.json if present ───
@@ -147,9 +147,9 @@ def run_kane(sc):
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=KANE_TIMEOUT + 30)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=KANE_TIMEOUT + 60)
     except subprocess.TimeoutExpired:
-        detail = f"Timeout after {KANE_TIMEOUT + 30}s"
+        detail = f"Timeout after {KANE_TIMEOUT + 60}s"
         log.failure(sc_id, "TIMEOUT", detail=detail)
         return None, None, detail
 
@@ -235,20 +235,28 @@ def fetch_tm_test_cases_by_ids(testcase_ids: list) -> list:
 # ── Phase 1: Run kane-cli objectives ─────────────────────────────────────────
 
 def phase1_run_objectives(objectives=None):
-    log.phase("PHASE 1 — Running kane-cli objectives")
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    log.phase("PHASE 1 — Running kane-cli objectives (parallel, max_workers=3)")
+    objs = list(objectives or SC_OBJECTIVES)
+    results = [None] * len(objs)
 
-    results = []
-    for sc in (objectives or SC_OBJECTIVES):
+    def _run(idx, sc):
         status, session_id, failure_detail = run_kane(sc)
         tc_id = get_testcase_id_from_session(session_id)
-        results.append({
+        return idx, {
             "sc_id":          sc["id"],
             "objective":      sc.get("objective", ""),
             "status":         status,
             "session_id":     session_id,
             "testcase_id":    tc_id,
             "failure_detail": failure_detail or "",
-        })
+        }
+
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futures = {ex.submit(_run, i, sc): i for i, sc in enumerate(objs)}
+        for fut in as_completed(futures):
+            idx, entry = fut.result()
+            results[idx] = entry
 
     passed = sum(1 for r in results if r["status"] == "passed")
     log.info(f"Kane-cli runs: {passed}/{len(results)} passed")
@@ -439,6 +447,8 @@ if __name__ == "__main__":
         record_he_job("flow2", job_id, job_link)
         # Trigger + fetch LT AI RCA (job_ids scope — covers all failed tests in run)
         run_rca(job_id, build_name=BUILD_NAME, log=log)
+        # Override run_history with actual HE pass/fail (not kane-cli Phase 1 status)
+        update_history_from_he(BUILD_NAME, flow="flow2", log=log)
 
     # Build live traceability matrix → reports/traceability_matrix.md + demo_cache.json
     run_traceability(log)

@@ -80,8 +80,8 @@ def build_matrix() -> dict:
         tm_id       = tm.get("tm_id", "")
         tc_internal = tm.get("internal_id", "—")   # e.g. TC-41514
         # Build TM test case URL: link uses tm_id (UUID), label shows tc_internal (TC-NNNNN)
-        TM_BASE = f"https://test-manager.lambdatest.com/projects/01KVXJ82AKT83GWJNFZTQVMNRQ/test-cases"
-        tc_link = f"[{tc_internal}]({TM_BASE}/{tm_id})" if tm_id else "—"
+        TM_BASE = "https://test-manager.lambdatest.com/projects/01KVXJ82AKT83GWJNFZTQVMNRQ/test-cases"
+        tc_link = f"[{tc_internal}]({TM_BASE}/{tm_id}/dashboard?type=summary)" if tm_id else "—"
 
         # RCA (written by rca.py after HE job)
         rca_entry   = rca_results.get(sc_id, {})
