@@ -155,7 +155,8 @@ def run_kane(sc):
 
     status = session_id = session_dir = failure_detail = None
 
-    for line in result.stdout.splitlines():
+    combined = result.stdout + "\n" + result.stderr
+    for line in combined.splitlines():
         try:
             ev = json.loads(line)
         except Exception:
@@ -170,8 +171,10 @@ def run_kane(sc):
     if status == "passed":
         log.success(sc_id, f"session: {session_id}")
     else:
-        failure_detail = (result.stderr or "")[:400] or "No run_end event captured"
+        raw = (result.stdout + result.stderr).strip()
+        failure_detail = raw[:500] if raw else f"No output (exit code {result.returncode})"
         log.failure(sc_id, detail=failure_detail)
+        log.info(f"[{sc_id}] exit={result.returncode} stdout={len(result.stdout)}b stderr={len(result.stderr)}b")
 
     return status, session_id, failure_detail
 
