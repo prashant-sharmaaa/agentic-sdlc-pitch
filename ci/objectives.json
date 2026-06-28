@@ -2,49 +2,49 @@
   {
     "id": "SC-001",
     "ac_id": "AC-001",
-    "name": "SC-001: Add to cart updates counter instantly",
-    "objective": "Navigate to https://www.saucedemo.com/, enter 'standard_user' in the username field, enter 'secret_sauce' in the password field, click the Login button, click 'Add to cart' on the first product tile, and assert that the shopping cart badge in the top-right navigation shows the number 1."
+    "name": "SC-001: Add to cart changes button to Remove",
+    "objective": "Navigate to https://www.saucedemo.com/, type 'standard_user' into the username input, type 'secret_sauce' into the password input, click the Login button, click the 'Add to cart' button on the Sauce Labs Backpack product card, and assert that the button on the Sauce Labs Backpack card now reads 'Remove'."
   },
   {
     "id": "SC-002",
     "ac_id": "AC-002",
-    "name": "SC-002: Cart page shows item names and prices",
-    "objective": "Navigate to https://www.saucedemo.com/, enter 'standard_user' in the username field, enter 'secret_sauce' in the password field, click the Login button, click 'Add to cart' on the first product tile, click the shopping cart icon in the top-right, and assert that the cart page shows a product name and a price in the cart item row."
+    "name": "SC-002: Cart page shows item name and price",
+    "objective": "Navigate to https://www.saucedemo.com/, type 'standard_user' into the username input, type 'secret_sauce' into the password input, click the Login button, click 'Add to cart' on the Sauce Labs Backpack product card, then navigate to https://www.saucedemo.com/cart.html and assert that the text 'Sauce Labs Backpack' is visible on the cart page."
   },
   {
     "id": "SC-003",
     "ac_id": "AC-003",
-    "name": "SC-003: Remove item clears cart badge",
-    "objective": "Navigate to https://www.saucedemo.com/, enter 'standard_user' in the username field, enter 'secret_sauce' in the password field, click the Login button, click 'Add to cart' on the first product tile, click the 'Remove' button that appears on that same product tile, and assert that the shopping cart badge is no longer visible in the navigation."
+    "name": "SC-003: Remove item restores Add to cart button",
+    "objective": "Navigate to https://www.saucedemo.com/, type 'standard_user' into the username input, type 'secret_sauce' into the password input, click the Login button, click 'Add to cart' on the Sauce Labs Backpack card, click the 'Remove' button that replaced it on the same card, and assert that the button on the Sauce Labs Backpack card now reads 'Add to cart'."
   },
   {
     "id": "SC-004",
     "ac_id": "AC-004",
     "name": "SC-004: Sort by price shows cheapest product first",
-    "objective": "Navigate to https://www.saucedemo.com/, enter 'standard_user' in the username field, enter 'secret_sauce' in the password field, click the Login button, open the sort dropdown and select 'Price (low to high)', and assert that the first product tile on the page displays the price $7.99."
+    "objective": "Navigate to https://www.saucedemo.com/, type 'standard_user' into the username input, type 'secret_sauce' into the password input, click the Login button, click the sort dropdown and select 'Price (low to high)', and assert that the first product tile on the page shows the price $7.99."
   },
   {
     "id": "SC-005",
     "ac_id": "AC-005",
-    "name": "SC-005: Catalog displays product tiles with pricing",
-    "objective": "Navigate to https://www.saucedemo.com/, enter 'standard_user' in the username field, enter 'secret_sauce' in the password field, click the Login button, and assert that the inventory page displays at least four product tiles each showing a product name and a price."
+    "name": "SC-005: Catalog page loads with product listings",
+    "objective": "Navigate to https://www.saucedemo.com/, type 'standard_user' into the username input, type 'secret_sauce' into the password input, click the Login button, and assert that the text 'Sauce Labs Backpack' is visible on the inventory page."
   },
   {
     "id": "SC-006",
     "ac_id": "AC-006",
-    "name": "SC-006: Product tile opens detail page with name, image, price",
-    "objective": "Navigate to https://www.saucedemo.com/, enter 'standard_user' in the username field, enter 'secret_sauce' in the password field, click the Login button, click the name or image of the first product tile, and assert that the product detail page displays the product name, at least one product image, and the product price."
+    "name": "SC-006: Product detail page shows name and price",
+    "objective": "Navigate to https://www.saucedemo.com/, type 'standard_user' into the username input, type 'secret_sauce' into the password input, click the Login button, click the title 'Sauce Labs Backpack' on the first product card, and assert that the text '$29.99' is visible on the product detail page."
   },
   {
     "id": "SC-007",
     "ac_id": "AC-007",
-    "name": "SC-007: Sort by name organises products alphabetically",
-    "objective": "Navigate to https://www.saucedemo.com/, enter 'standard_user' in the username field, enter 'secret_sauce' in the password field, click the Login button, open the sort dropdown and select 'Name (A to Z)', and assert that the first product tile displays the name 'Sauce Labs Backpack'."
+    "name": "SC-007: Sort by name A to Z puts Backpack first",
+    "objective": "Navigate to https://www.saucedemo.com/, type 'standard_user' into the username input, type 'secret_sauce' into the password input, click the Login button, click the sort dropdown and select 'Name (A to Z)', and assert that the first product title on the page is 'Sauce Labs Backpack'."
   },
   {
     "id": "SC-008",
     "ac_id": "AC-008",
-    "name": "SC-008: Add to cart changes button to Remove",
-    "objective": "Navigate to https://www.saucedemo.com/, enter 'standard_user' in the username field, enter 'secret_sauce' in the password field, click the Login button, click 'Add to cart' on the first product tile, and assert that the button on that product tile now displays the text 'Remove'."
+    "name": "SC-008: Cart page shows price of added item",
+    "objective": "Navigate to https://www.saucedemo.com/, type 'standard_user' into the username input, type 'secret_sauce' into the password input, click the Login button, click 'Add to cart' on the Sauce Labs Backpack product card, then navigate to https://www.saucedemo.com/cart.html and assert that the text '$29.99' is visible on the cart page."
   }
 ]
