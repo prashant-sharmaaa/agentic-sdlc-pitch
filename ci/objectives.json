@@ -9,7 +9,7 @@
     "id": "SC-002",
     "ac_id": "AC-002",
     "name": "SC-002: Cart dropdown shows item names and prices",
-    "objective": "Navigate to https://automationexercise.com/products, click \"Add to cart\" on the first product, click \"Continue Shopping\" in the modal, click the cart icon in the top nav bar, and assert that the cart page at https://automationexercise.com/view_cart shows the product name and price visible in the cart row."
+    "objective": "Navigate to https://automationexercise.com/products, click \"Add to cart\" on the first product, click \"View Cart\" in the modal that appears, and assert that the cart page at https://automationexercise.com/view_cart shows the product name and price visible in the cart row."
   },
   {
     "id": "SC-003",
