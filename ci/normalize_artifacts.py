@@ -1,7 +1,22 @@
 #!/usr/bin/env python3
 """Normalise HyperExecute + Kane artifacts into reports/normalized_results.json."""
 import json
+import sys
 from pathlib import Path
+
+# Allow importing fetch_rca from the ci/ directory
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from fetch_rca import fetch_rca, trigger_rca, summarize_rca, _extract_session_id
+except Exception:
+    def fetch_rca(_: str) -> str:            # type: ignore
+        return ""
+    def trigger_rca(_: list) -> None:        # type: ignore
+        pass
+    def summarize_rca(raw: str, scenario_id: str = "") -> str:  # type: ignore
+        return raw[:300]
+    def _extract_session_id(_: str) -> str:  # type: ignore
+        return ""
 
 
 def _extract_fn(node_id: str) -> str:
@@ -40,7 +55,26 @@ def main() -> None:
                 "function_name":  fn,
                 "status":         status,
                 "session_link":   t.get("session_link", ""),
+                "rca":            "",
             }
+
+    # Bulk-trigger TestMu AI RCA generation for all failed sessions
+    failed_results = [r for r in best.values() if r["status"] == "failed" and r.get("session_link")]
+    if failed_results:
+        failed_sids = [_extract_session_id(r["session_link"]) for r in failed_results]
+        failed_sids = [s for s in failed_sids if s]
+        if failed_sids:
+            print(f"[normalize] triggering TestMu AI RCA for {len(failed_sids)} failed session(s) …")
+            trigger_rca(failed_sids)
+            # Give the async RCA generation a moment to start
+            import time
+            time.sleep(5)
+
+    # Fetch and summarize RCA for each failed session
+    for result in failed_results:
+        print(f"[normalize] fetching RCA for {result['scenario_id']} …")
+        raw = fetch_rca(result["session_link"])
+        result["rca"] = summarize_rca(raw, result["scenario_id"])
 
     normalized = list(best.values())
     Path("reports").mkdir(exist_ok=True)

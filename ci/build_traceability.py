@@ -24,6 +24,7 @@ def main() -> None:
         result = results_by_sc.get(sc_id, {})
         test_result = result.get("status", "not_run")
         link = result.get("session_link", "")
+        rca  = result.get("rca", "")
         overall = "✅" if test_result == "passed" else ("❌" if test_result == "failed" else "⏭")
         if test_result == "passed":   passed += 1
         elif test_result == "failed": failed += 1
@@ -32,6 +33,7 @@ def main() -> None:
             "req_id": req["id"], "criterion": req["description"][:80],
             "sc_id": sc_id, "tc_id": tc_id,
             "kane": kane, "result": test_result, "link": link, "overall": overall,
+            "rca": rca,
         })
 
     total = len(rows)
@@ -39,17 +41,29 @@ def main() -> None:
 
     # Markdown report
     lines = ["# Traceability Matrix\n",
-             f"| Req | Acceptance Criterion | Scenario | TC | KaneAI | Result | Overall |",
-             f"| --- | --- | --- | --- | --- | --- | --- |"]
+             f"| Req | Acceptance Criterion | Scenario | TC | KaneAI | Result | Overall | RCA |",
+             f"| --- | --- | --- | --- | --- | --- | --- | --- |"]
     for r in rows:
         link_md = f"[{r['result']}]({r['link']})" if r["link"] else r["result"]
-        lines.append(f"| {r['req_id']} | {r['criterion']} | {r['sc_id']} | {r['tc_id']} | {r['kane']} | {link_md} | {r['overall']} |")
+        rca_snippet = (r.get("rca", "")[:80] + "…") if len(r.get("rca", "")) > 80 else r.get("rca", "")
+        lines.append(f"| {r['req_id']} | {r['criterion']} | {r['sc_id']} | {r['tc_id']} | {r['kane']} | {link_md} | {r['overall']} | {rca_snippet} |")
 
     lines += ["",
               f"## Summary",
               f"- Requirements: {total}",
               f"- Passed: {passed}  Failed: {failed}  Untested: {untested}",
               f"- Pass rate: {pass_rate}%"]
+
+    # Detailed RCA section for every failed scenario
+    failed_rows = [r for r in rows if r["result"] == "failed"]
+    if failed_rows:
+        lines += ["", "## Failed Scenarios — Detailed RCA"]
+        for r in failed_rows:
+            lines.append(f"\n### {r['sc_id']} — {r['req_id']}")
+            if r["link"]:
+                lines.append(f"**Session:** [{r['link']}]({r['link']})")
+            rca_text = r.get("rca") or "_RCA not available_"
+            lines.append(f"\n**Root Cause Analysis:**\n\n{rca_text}\n")
 
     Path("reports").mkdir(exist_ok=True)
     Path("reports/traceability_matrix.md").write_text("\n".join(lines), encoding="utf-8")

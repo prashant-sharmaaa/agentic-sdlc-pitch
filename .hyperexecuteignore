@@ -1,0 +1,14 @@
+.venv
+.venv_he311
+.venv_he_test
+node_modules
+.npm_cache
+.pip_cache
+.pytest_cache
+.hyperexecute
+__pycache__
+tests/playwright/test_scenarios.py
+tests/playwright/python-backup
+tests/playwright/conftest.py
+reports
+*.log

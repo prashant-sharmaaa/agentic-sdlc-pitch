@@ -1,0 +1,50 @@
+[
+  {
+    "id": "SC-001",
+    "ac_id": "AC-001",
+    "name": "SC-001: Add to cart updates counter instantly",
+    "objective": "Navigate to https://automationexercise.com/products, click the \"View Product\" link on the first product card, click the \"Add to Cart\" button on the product detail page, then assert that the cart icon in the top navigation bar displays a count of 1."
+  },
+  {
+    "id": "SC-002",
+    "ac_id": "AC-002",
+    "name": "SC-002: Cart dropdown shows item names and prices",
+    "objective": "Navigate to https://automationexercise.com/products, click \"Add to cart\" on the first product, click \"Continue Shopping\" in the modal, click the cart icon in the top nav bar, and assert that the cart page at https://automationexercise.com/view_cart shows the product name and price visible in the cart row."
+  },
+  {
+    "id": "SC-003",
+    "ac_id": "AC-003",
+    "name": "SC-003: Remove item recalculates cart total",
+    "objective": "Navigate to https://automationexercise.com/products, click \"Add to cart\" on the first product, click \"View Cart\" in the modal, then click the X button to remove the item from the cart row, and assert that the cart is empty with a total of $0 or no items displayed in the cart table."
+  },
+  {
+    "id": "SC-004",
+    "ac_id": "AC-004",
+    "name": "SC-004: Search returns relevant product results",
+    "objective": "Navigate to https://automationexercise.com/products, type \"Blue Top\" in the search bar and press Enter, then assert that at least one product tile containing \"Blue Top\" is visible in the search results."
+  },
+  {
+    "id": "SC-005",
+    "ac_id": "AC-005",
+    "name": "SC-005: Catalog displays product tiles with pricing",
+    "objective": "Navigate to https://automationexercise.com/products and verify that multiple product tiles are visible, each displaying a product name and price."
+  },
+  {
+    "id": "SC-006",
+    "ac_id": "AC-006",
+    "name": "SC-006: Product tile opens detail page with name, image, price",
+    "objective": "Navigate to https://automationexercise.com/products, click the View Product link on the first product tile, and assert that the product detail page displays the product name, at least one product image, and the product price."
+  },
+  {
+    "id": "SC-007",
+    "ac_id": "AC-007",
+    "name": "SC-007: Category filter narrows product list",
+    "objective": "Navigate to https://automationexercise.com/products, click the \"Women\" category in the left sidebar, then click the \"Dress\" sub-category, and assert that the page displays \"Women - Dress Products\" as the category heading with a filtered product grid visible."
+  },
+  {
+    "id": "SC-008",
+    "ac_id": "AC-008",
+    "name": "SC-008: Success message appears on cart add",
+    "objective": "Navigate to https://automationexercise.com/products, click the \"Add to cart\" button on the first product card, and assert that a modal or success notification containing \"Added!\" or \"Your product has been added to cart!\" is visible on the page."
+  }
+]

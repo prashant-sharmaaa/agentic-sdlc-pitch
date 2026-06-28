@@ -206,7 +206,8 @@ def sync_scenarios(requirements: list, existing: list) -> list:
             "steps": req.get("kane_steps") or [f"Navigate to {TARGET_URL}", "Verify the criterion"],
             "expected_result": req.get("kane_summary") or req["description"],
             "kane_url": TARGET_URL, "last_verified": TODAY,
-            "kane_code": req.get("kane_code", ""),
+            # Preserve existing kane_code — req won't have it (comes from analyzed_requirements.json)
+            "kane_code": req.get("kane_code", "") or (ex.get("kane_code", "") if ex else ""),
         })
     for sc in existing:
         if sc["requirement_id"] not in current_req_ids:
@@ -216,10 +217,36 @@ def sync_scenarios(requirements: list, existing: list) -> list:
 
 # ── Stage 3: Generate tests ───────────────────────────────────────────────────
 
+KANE_TESTS_DIR = Path("tests/playwright/kane")
+
+
+def write_kane_tests(scenarios: list) -> int:
+    """Write each scenario's Kane-exported test.py to tests/playwright/kane/<SC-ID>/test.py.
+
+    Returns the count of Kane tests written.
+    """
+    written = 0
+    for sc in scenarios:
+        if sc.get("status") == "deprecated":
+            continue
+        kane_code = sc.get("kane_code", "").strip()
+        if not kane_code:
+            continue
+        sc_dir = KANE_TESTS_DIR / sc["id"]
+        sc_dir.mkdir(parents=True, exist_ok=True)
+        test_file = sc_dir / "test.py"
+        test_file.write_text(kane_code, encoding="utf-8")
+        written += 1
+    print(f"[write_kane_tests] wrote {written} Kane test file(s) → {KANE_TESTS_DIR}/")
+    return written
+
+
 def generate_tests(scenarios: list) -> None:
     active = [s for s in scenarios if s["status"] != "deprecated"]
+    # Kane tests run standalone via testmu — only generate pytest bodies for non-Kane scenarios
+    non_kane = [s for s in active if not s.get("kane_code", "").strip()]
     lines  = [TEST_HEADER.rstrip(), ""]
-    for sc in active:
+    for sc in non_kane:
         lines.append(_build_test_fn(sc).rstrip())
         lines.append("")
     out = Path("tests/playwright/test_scenarios.py")
@@ -228,7 +255,7 @@ def generate_tests(scenarios: list) -> None:
     for sc in active:
         if not sc.get("function_name"):
             sc["function_name"] = _derive_fn_name(sc["id"], sc.get("title", sc["id"]))
-    print(f"[generate_tests] wrote {len(active)} test(s) → {out}")
+    print(f"[generate_tests] wrote {len(non_kane)} pytest test(s) + {len(active)-len(non_kane)} Kane test(s) → {out}")
 
 
 def _validate_syntax(path: str) -> bool:
@@ -255,8 +282,17 @@ def _validate_syntax(path: str) -> bool:
 def write_test_selection(scenarios: list) -> list:
     selected = [s for s in scenarios if s["status"] != "deprecated"] if FULL_RUN \
                else [s for s in scenarios if s["status"] in ("new", "updated")]
-    lines = [f"tests/playwright/test_scenarios.py::{s.get('function_name') or _derive_fn_name(s['id'], s.get('title', s['id']))}"
-             for s in selected]
+    lines = []
+    for s in selected:
+        sc_id = s["id"]
+        kane_file = KANE_TESTS_DIR / sc_id / "test.py"
+        if kane_file.exists():
+            # Prefer exact Kane test.py (run by testmu)
+            lines.append(str(kane_file))
+        else:
+            # Fallback to pytest test
+            fn = s.get("function_name") or _derive_fn_name(sc_id, s.get("title", sc_id))
+            lines.append(f"tests/playwright/test_scenarios.py::{fn}")
     Path("reports").mkdir(exist_ok=True)
     Path("reports/pytest_selection.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     Path("reports/test_execution_manifest.json").write_text(json.dumps({
@@ -281,14 +317,14 @@ def run_hyperexecute() -> str:
     if not sel.exists() or not sel.read_text().strip():
         print("[hyperexecute] no tests selected — skipping")
         return ""
-    cmd = [cli, "--user", LT_USERNAME, "--key", LT_ACCESS_KEY, "--config", "hyperexecute.yaml"]
+    cmd = [cli, "--user", LT_USERNAME, "--key", LT_ACCESS_KEY, "--config", "hyperexecute.yaml", "--verbose"]
     t0 = time.monotonic()
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     combined = result.stdout + result.stderr
     Path("reports/hyperexecute-cli.log").write_text(combined, encoding="utf-8")
     elapsed = round(time.monotonic() - t0, 1)
     print(f"[hyperexecute] exit={result.returncode} duration={elapsed}s")
-    for line in combined.splitlines()[:20]:
+    for line in combined.splitlines():
         print(f"  {line}")
     job_id = _extract_job_id(combined)
     print(f"[hyperexecute] job_id={job_id!r}")
@@ -452,12 +488,17 @@ async def main() -> None:
     print_stage_result("2", "MANAGE_SCENARIOS", counts | {"Total": len(scenarios)})
 
     # Stage 3: Generate tests
-    print_stage_header("3", "GENERATE_TESTS", "Generate Playwright tests from scenarios")
+    print_stage_header("3", "GENERATE_TESTS", "Write Kane test files + fallback pytest tests")
+    kane_count = write_kane_tests(scenarios)
     generate_tests(scenarios)
     sc_path.write_text(json.dumps(scenarios, indent=2), encoding="utf-8")
     if not _validate_syntax("tests/playwright/test_scenarios.py"):
         sys.exit(1)
-    print_stage_result("3", "GENERATE_TESTS", {"Active tests": sum(1 for s in scenarios if s["status"] != "deprecated")})
+    non_kane_count = sum(1 for s in scenarios if s["status"] != "deprecated" and not s.get("kane_code","").strip())
+    print_stage_result("3", "GENERATE_TESTS", {
+        "Kane test files": kane_count,
+        "Fallback pytest tests": non_kane_count,
+    })
 
     # Stage 4: Select tests
     print_stage_header("4", "SELECT_TESTS", "Build test execution manifest")

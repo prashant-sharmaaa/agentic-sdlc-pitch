@@ -1,7 +1,8 @@
-version: 0.1
-globalTimeout: 180
-testSuiteTimeout: 180
-testSuiteStep: 180
+---
+version: "0.1"
+globalTimeout: 90
+testSuiteTimeout: 90
+testSuiteStep: 90
 
 runson: linux
 
@@ -10,35 +11,24 @@ retryOnFailure: true
 maxRetries: 1
 concurrency: 5
 
-# BROWSERS drives pytest parametrize in conftest.py.
-# Each test runs once per browser → 4x coverage per scenario.
 env:
-  LT_USERNAME:        ${LT_USERNAME}
-  LT_ACCESS_KEY:      ${LT_ACCESS_KEY}
-  GITHUB_RUN_NUMBER:  ${GITHUB_RUN_NUMBER}
-  TARGET_URL:         "https://ecommerce-playground.lambdatest.io/"
-  BROWSERS:           "chrome,firefox"
+  TARGET_OS: "LINUX"
+  BUILD: "Agentic SDLC | KaneAI Export"
 
-cacheKey: '{{ checksum "requirements-he.txt" }}'
+cacheKey: '{{ checksum "requirement.txt" }}'
 cacheDirectories:
-  - .pip_cache
+  - CacheDir
 
 pre:
-  - mkdir -p reports
-  - pip3 install --cache-dir .pip_cache -r requirements-he.txt
-  - python3 -c "from playwright.sync_api import sync_playwright; print('[pre] playwright OK')"
-  - python3 ci/generate_he_tests.py
+  - pip3 install -r requirement.txt --cache-dir CacheDir
+  - playwright install
 
 testDiscovery:
   type: raw
   mode: dynamic
   command: python3 ci/list_tests.py
 
-testRunnerCommand: >
-  PYTHONPATH=. python3 -m pytest "$test" -v --tb=short -s
-  -p no:playwright
-  --html=reports/report.html
-  --junitxml=reports/junit.xml
+testRunnerCommand: python $test
 
 mergeArtifacts: true
 uploadArtefacts:
@@ -53,10 +43,11 @@ partialReports:
   frameworkName: extent
 
 post:
-  - echo "HyperExecute Agentic SDLC run complete"
+  - echo "HyperExecute Agentic SDLC — Kane Python export run complete"
 
 jobLabel:
   - agentic-sdlc
   - lambdatest-pitch
+  - kaneai
+  - python
   - playwright
-  - multi-browser

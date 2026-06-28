@@ -42,12 +42,14 @@ def main() -> None:
         lines += [f"🔗 [View HyperExecute Job]({job_link})", ""]
 
     lines += ["## Traceability Matrix",
-              "| Req | Criterion | Scenario | KaneAI | Test Result |",
-              "| --- | --- | --- | --- | --- |"]
+              "| Req | Criterion | Scenario | KaneAI | Test Result | RCA |",
+              "| --- | --- | --- | --- | --- | --- |"]
     for r in matrix:
         link = r.get('link', '')
         result_cell = f"[{r['result']}]({link})" if link else r['result']
-        lines.append(f"| {r['req_id']} | {r['criterion'][:60]} | {r['sc_id']} | {r['kane']} | {r['overall']} {result_cell} |")
+        rca_raw = r.get('rca', '')
+        rca_cell = (rca_raw[:80] + "…") if len(rca_raw) > 80 else rca_raw
+        lines.append(f"| {r['req_id']} | {r['criterion'][:60]} | {r['sc_id']} | {r['kane']} | {r['overall']} {result_cell} | {rca_cell} |")
 
     lines += ["", "## Release Verdict", "", verdict_md]
 

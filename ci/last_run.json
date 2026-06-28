@@ -1,0 +1,66 @@
+[
+  {
+    "id": "SC-001",
+    "ac_id": "AC-001",
+    "name": "SC-001: Add to cart updates counter instantly",
+    "objective": "Navigate to https://automationexercise.com/products, click the \"View Product\" link on the first product card, click the \"Add to Cart\" button on the product detail page, then assert that the cart icon in the top navigation bar displays a count of 1.",
+    "status": "passed",
+    "session_dir": "/Users/gagandeepb/.testmuai/kaneai/sessions/75abb891-0f8e-4fa2-bbe9-0827ed5082f1"
+  },
+  {
+    "id": "SC-002",
+    "ac_id": "AC-002",
+    "name": "SC-002: Cart dropdown shows item names and prices",
+    "objective": "Navigate to https://automationexercise.com/products, click \"Add to cart\" on the first product, click \"Continue Shopping\" in the modal, click the cart icon in the top nav bar, and assert that the cart page at https://automationexercise.com/view_cart shows the product name and price visible in the cart row.",
+    "status": "passed",
+    "session_dir": "/Users/gagandeepb/.testmuai/kaneai/sessions/69c9ce29-cf51-4ff8-9f39-c82a36ccac1d"
+  },
+  {
+    "id": "SC-003",
+    "ac_id": "AC-003",
+    "name": "SC-003: Remove item recalculates cart total",
+    "objective": "Navigate to https://automationexercise.com/products, click \"Add to cart\" on the first product, click \"View Cart\" in the modal, then click the X button to remove the item from the cart row, and assert that the cart is empty with a total of $0 or no items displayed in the cart table.",
+    "status": "failed",
+    "session_dir": "/Users/gagandeepb/.testmuai/kaneai/sessions/4228ef2e-c67a-468c-9aee-359b3d935cf8"
+  },
+  {
+    "id": "SC-004",
+    "ac_id": "AC-004",
+    "name": "SC-004: Search returns relevant product results",
+    "objective": "Navigate to https://automationexercise.com/products, type \"Blue Top\" in the search bar and press Enter, then assert that at least one product tile containing \"Blue Top\" is visible in the search results.",
+    "status": "passed",
+    "session_dir": "/Users/gagandeepb/.testmuai/kaneai/sessions/2d53739e-b0e7-465d-a7b3-ec4806fa22a2"
+  },
+  {
+    "id": "SC-005",
+    "ac_id": "AC-005",
+    "name": "SC-005: Catalog displays product tiles with pricing",
+    "objective": "Navigate to https://automationexercise.com/products and verify that multiple product tiles are visible, each displaying a product name and price.",
+    "status": "passed",
+    "session_dir": "/Users/gagandeepb/.testmuai/kaneai/sessions/5c4a6ae4-7519-4dba-b643-ec552e9b331a"
+  },
+  {
+    "id": "SC-006",
+    "ac_id": "AC-006",
+    "name": "SC-006: Product tile opens detail page with name, image, price",
+    "objective": "Navigate to https://automationexercise.com/products, click the View Product link on the first product tile, and assert that the product detail page displays the product name, at least one product image, and the product price.",
+    "status": "passed",
+    "session_dir": "/Users/gagandeepb/.testmuai/kaneai/sessions/aa41f8b5-4a0e-4d26-bb6c-f99c44950b83"
+  },
+  {
+    "id": "SC-007",
+    "ac_id": "AC-007",
+    "name": "SC-007: Category filter narrows product list",
+    "objective": "Navigate to https://automationexercise.com/products, click the \"Women\" category in the left sidebar, then click the \"Dress\" sub-category, and assert that the page displays \"Women - Dress Products\" as the category heading with a filtered product grid visible.",
+    "status": "passed",
+    "session_dir": "/Users/gagandeepb/.testmuai/kaneai/sessions/bd00b066-8c50-4fb0-a5e6-285177b1f612"
+  },
+  {
+    "id": "SC-008",
+    "ac_id": "AC-008",
+    "name": "SC-008: Success message appears on cart add",
+    "objective": "Navigate to https://automationexercise.com/products, click the \"Add to cart\" button on the first product card, and assert that a modal or success notification containing \"Added!\" or \"Your product has been added to cart!\" is visible on the page.",
+    "status": "passed",
+    "session_dir": "/Users/gagandeepb/.testmuai/kaneai/sessions/518e0fbf-21ad-4dfc-8d67-e56fe092b1d3"
+  }
+]
