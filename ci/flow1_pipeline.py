@@ -299,6 +299,15 @@ def phase2_transform_and_write(results):
 
 # ── Phase 3: Trigger HyperExecute ────────────────────────────────────────────
 
+def _update_he_concurrency(n: int):
+    """Set concurrency in hyperexecute.yaml to match number of scenarios."""
+    import re
+    text = HE_CONFIG.read_text()
+    updated = re.sub(r'^concurrency:\s*\d+', f'concurrency: {n}', text, flags=re.MULTILINE)
+    HE_CONFIG.write_text(updated)
+    log.info(f"[he] hyperexecute.yaml concurrency → {n}")
+
+
 def phase3_trigger_he():
     log.phase("PHASE 3 — Triggering HyperExecute")
 
@@ -417,6 +426,7 @@ if __name__ == "__main__":
         log.error("No test files written — aborting HE trigger")
         sys.exit(1)
 
+    _update_he_concurrency(len(written))
     job_id, job_link = phase3_trigger_he()
 
     # Persist HE job
