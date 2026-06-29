@@ -1,11 +1,9 @@
-name: "Flow 2 — KaneAI TM API"
+name: "Agentic SDLC"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Flow 2: Requirements → Claude ACs → Claude Objectives → KaneAI (kane-cli)
-#         → LambdaTest Test Manager (test cases via API) → HyperExecute
-#         → AI RCA → Traceability
-#
-# Runs fully independently from Flow 1 — runs its own kane-cli sessions.
+# Agentic SDLC: Requirements → Claude ACs → Claude Objectives → KaneAI (kane-cli)
+#               → LambdaTest Test Manager (test cases via API) → HyperExecute
+#               → AI RCA → Traceability
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -30,7 +28,7 @@ env:
 
 jobs:
   flow2-pipeline:
-    name: "Flow 2 · KaneAI → Test Manager → HyperExecute"
+    name: "Agentic SDLC · KaneAI → Test Manager → HyperExecute"
     runs-on: ubuntu-latest
     permissions:
       contents: write   # needed for auto-improve git commit + push
@@ -192,7 +190,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## Flow 2 — KaneAI TM API Results"
+            echo "## Agentic SDLC — Results"
             echo ""
             if [ -f reports/traceability_matrix.md ]; then
               cat reports/traceability_matrix.md

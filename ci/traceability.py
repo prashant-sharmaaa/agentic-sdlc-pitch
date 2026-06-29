@@ -239,13 +239,14 @@ def save(matrix: dict, *, print_table: bool = False):
 
 # ── Public API used by pipelines ──────────────────────────────────────────────
 
-def record_he_job(flow: str, job_id: str, job_link: str):
+def record_he_job(flow: str, job_id: str, job_link: str, tm_report_url: str = ""):
     """Called by pipeline after Phase 3 to persist HE job info."""
     jobs = _load(HE_JOBS_FILE, {})
     jobs[flow] = {
-        "job_id":   job_id,
-        "job_link": job_link,
-        "ts":       datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "job_id":        job_id,
+        "job_link":      job_link,
+        "tm_report_url": tm_report_url,
+        "ts":            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     HE_JOBS_FILE.write_text(json.dumps(jobs, indent=2))
 
