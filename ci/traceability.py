@@ -53,6 +53,9 @@ def _load(path: Path, default):
 def build_matrix() -> dict:
     """Build and return the full traceability matrix from live pipeline data."""
     requirements = _load(REQUIREMENTS_FILE, [])
+    # analyzed_requirements.json is {"base_url":..., "acceptance_criteria":[...]}
+    if isinstance(requirements, dict):
+        requirements = requirements.get("acceptance_criteria", [])
     objectives   = _load(OBJECTIVES_FILE, [])
     history      = _load(HISTORY_FILE, {})
     tm_tcs       = _load(TM_TC_FILE, {})      # sc_id → {tm_id, title, internal_id}
@@ -191,10 +194,14 @@ def write_markdown(matrix: dict) -> str:
     if he_jobs:
         lines += ["", "## HyperExecute Jobs"]
         for flow, info in he_jobs.items():
-            link = info.get("job_link", "")
-            jid  = info.get("job_id", "")
-            ts2  = info.get("ts", "")
-            lines.append(f"- **{flow}:** [{jid}]({link}) — {ts2}")
+            link       = info.get("job_link", "")
+            jid        = info.get("job_id", "")
+            ts2        = info.get("ts", "")
+            report_url = info.get("tm_report_url", "")
+            he_line = f"- **{flow}:** [{jid}]({link}) — {ts2}"
+            if report_url:
+                he_line += f" | [📋 Test Run Report]({report_url})"
+            lines.append(he_line)
 
     failed_rows = [r for r in rows if r["status"] == "failed"]
     if failed_rows:

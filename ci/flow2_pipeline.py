@@ -49,7 +49,32 @@ TM_API        = "https://test-manager-api.lambdatest.com/api/v1"
 HE_API        = "https://test-manager-api.lambdatest.com/api/atm/v1/hyperexecute"
 PROJECT_ID    = "01KVXJ82AKT83GWJNFZTQVMNRQ"   # kane-agentic
 ENVIRONMENT_ID = 282603                           # Windows Config — Win10, Firefox 150, desktop web
-BASE_URL      = "https://www.saucedemo.com/"
+# BASE_URL: read from analyzed_requirements.json if available, else extract from first objective
+def _resolve_base_url() -> str:
+    analyzed = Path(__file__).parent.parent / "requirements" / "analyzed_requirements.json"
+    if analyzed.exists():
+        try:
+            data = json.loads(analyzed.read_text())
+            url = data.get("base_url", "")
+            if url:
+                return url.rstrip("/") + "/"
+        except Exception:
+            pass
+    # Fall back: extract URL from first objective string
+    obj_file = Path(__file__).parent / "objectives.json"
+    if obj_file.exists():
+        try:
+            objs = json.loads(obj_file.read_text())
+            if objs:
+                import re
+                m = re.search(r'https?://[^\s,]+', objs[0].get("objective", ""))
+                if m:
+                    return m.group(0).rstrip("/.") + "/"
+        except Exception:
+            pass
+    return "https://www.saucedemo.com/"
+
+BASE_URL = _resolve_base_url()
 KANE_TIMEOUT  = 600   # seconds per kane-cli run (10 min — let kane-cli use its own default)
 BUILD_NAME    = f"Agentic SDLC | KaneAI Flow2 | {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}"
 
@@ -361,6 +386,39 @@ def phase2_fetch_test_cases(kane_results):
 
 # ── Phase 3: Create test run + trigger HyperExecute ──────────────────────────
 
+def poll_he_job(job_id: str, build_name: str, timeout: int = 1800, log=None) -> str:
+    """
+    Poll automation sessions API until all sessions for the build reach a final
+    status (passed/failed/cancelled/error) or timeout is reached.
+    Returns 'completed' or 'timeout'.
+    Final statuses are checked every 30s after an initial 60s warm-up.
+    """
+    from rca import fetch_sessions_for_build
+    _log = lambda m: (log.info(m) if log else print(m))
+    FINAL = {"passed", "failed", "cancelled", "error", "skipped", "stopped"}
+
+    _log(f"[he-poll] Waiting for HE job {job_id} to complete (timeout={timeout}s)...")
+    time.sleep(60)  # warm-up — HE takes time to start sessions
+
+    elapsed = 60
+    while elapsed < timeout:
+        sessions = fetch_sessions_for_build(build_name, log=None)
+        if sessions:
+            statuses = {s["status"] for s in sessions}
+            pending  = statuses - FINAL
+            _log(f"[he-poll] {len(sessions)} session(s) — statuses: {dict((s, sum(1 for x in sessions if x['status']==s)) for s in statuses)}")
+            if not pending:
+                _log(f"[he-poll] All sessions in final state after {elapsed}s")
+                return "completed"
+        else:
+            _log(f"[he-poll] No sessions yet (elapsed={elapsed}s) — waiting...")
+        time.sleep(30)
+        elapsed += 30
+
+    _log(f"[he-poll] Timeout after {timeout}s — proceeding with partial results")
+    return "timeout"
+
+
 def phase3_trigger_he(test_cases):
     print("\n" + "="*60)
     print("PHASE 3 — Creating test run + triggering HyperExecute")
@@ -393,7 +451,9 @@ def phase3_trigger_he(test_cases):
     if not test_run_id:
         print(f"  ERROR: failed to create test run: {run_resp}", file=sys.stderr)
         sys.exit(1)
+    tm_report_url = f"https://test-manager.lambdatest.com/projects/{PROJECT_ID}/test-run/{test_run_id}?type=report"
     print(f"       test_run_id: {test_run_id}")
+    print(f"       TM Report  : {tm_report_url}")
 
     # Step 3b: Link instances with environment
     print(f"  [3b] Linking {len(instances)} instance(s) with environment {ENVIRONMENT_ID}...")
@@ -426,10 +486,11 @@ def phase3_trigger_he(test_cases):
     job_link = he_resp.get("job_link")
 
     print(f"\n{'='*60}")
-    print(f"  Job ID  : {job_id}")
-    print(f"  Job Link: {job_link}")
+    print(f"  Job ID     : {job_id}")
+    print(f"  Job Link   : {job_link}")
+    print(f"  TM Report  : {tm_report_url}")
     print(f"{'='*60}")
-    return job_id, job_link
+    return job_id, job_link, tm_report_url
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -451,10 +512,18 @@ if __name__ == "__main__":
     if not args.skip_phase1:
         history = load_history()
         if history:
-            healed = heal_objectives(history, log)
-            if healed:
-                if _OBJECTIVES_FILE.exists():
-                    SC_OBJECTIVES = json.loads(_OBJECTIVES_FILE.read_text())
+            # Skip heal if objectives are for a different app than last run
+            # (new requirements URL was provided — old history is irrelevant)
+            current_ids = {o["id"] for o in SC_OBJECTIVES}
+            history_ids = set(history.keys())
+            overlap = current_ids & history_ids
+            if not overlap:
+                log.info("[self-heal] New objectives detected — skipping cross-run heal (different app or fresh requirements)")
+            else:
+                healed = heal_objectives(history, log)
+                if healed:
+                    if _OBJECTIVES_FILE.exists():
+                        SC_OBJECTIVES = json.loads(_OBJECTIVES_FILE.read_text())
 
     if args.skip_phase1:
         last_run_file = Path(__file__).parent / "last_run.json"
@@ -496,17 +565,49 @@ if __name__ == "__main__":
             log.info(f"[tm] {r['sc_id']} → {r.get('testcase_id')} ({src})")
         record_tm_test_cases_with_sc(passed_results, test_cases)
 
-    job_id, job_link = phase3_trigger_he(test_cases)
+    job_id, job_link, tm_report_url = phase3_trigger_he(test_cases)
 
     # Persist HE job
     if job_id:
-        record_he_job("flow2", job_id, job_link)
-        # Trigger + fetch LT AI RCA (job_ids scope — covers all failed tests in run)
-        run_rca(job_id, build_name=BUILD_NAME, log=log)
+        record_he_job("flow2", job_id, job_link, tm_report_url=tm_report_url)
+
+        # Wait for HE job to finish before fetching results / running RCA
+        poll_he_job(job_id, BUILD_NAME, timeout=1800, log=log)
+
         # Override run_history with actual HE pass/fail (not kane-cli Phase 1 status)
         update_history_from_he(BUILD_NAME, flow="flow2", log=log)
 
-    # Build live traceability matrix → reports/traceability_matrix.md + demo_cache.json
+        # RCA only for failed test sessions (skips automatically if triggered=0)
+        run_rca(job_id, build_name=BUILD_NAME, log=log)
+
+    # Build traceability matrix after HE results are in
     run_traceability(log)
+
+    # ── Auto-improve: heal objectives from full run results ──────────────
+    # Run heal_objectives again with final HE history + RCA so ALL failed SCs
+    # get improved objectives — then commit back to repo for next run.
+    final_history = load_history()
+    rca_data = json.loads(Path(__file__).parent.joinpath("rca_results.json").read_text()) \
+               if Path(__file__).parent.joinpath("rca_results.json").exists() else {}
+    healed_count = heal_objectives(final_history, log, rca_results=rca_data)
+    if healed_count:
+        log.info(f"[auto-improve] {healed_count} objective(s) improved — committing objectives.json")
+        import subprocess as _sp
+        run_number = os.environ.get("GITHUB_RUN_NUMBER", "?")
+        _sp.run(["git", "config", "user.email", "actions@github.com"], check=False)
+        _sp.run(["git", "config", "user.name", "GitHub Actions"], check=False)
+        _sp.run(["git", "add", "ci/objectives.json"], check=False)
+        result = _sp.run(
+            ["git", "commit", "-m",
+             f"chore(objectives): auto-improve {healed_count} SC(s) from run #{run_number} [skip ci]"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            _sp.run(["git", "push"], check=False)
+            log.info("[auto-improve] objectives.json committed and pushed")
+        else:
+            log.info("[auto-improve] nothing to commit (objectives unchanged)")
+    else:
+        log.info("[auto-improve] all SCs passed — no objective improvements needed")
 
     log.info("Done — monitor at: https://hyperexecute.lambdatest.com/")

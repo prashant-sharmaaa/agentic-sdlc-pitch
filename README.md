@@ -1,157 +1,256 @@
 # Agentic SDLC — LambdaTest
 
-> Requirements go in. **KaneAI authors the tests.** HyperExecute runs them. Traced results come out. Zero human test writing.
+> Requirements go in. **KaneAI authors the tests.** HyperExecute runs them. AI explains failures. Objectives auto-improve every run.
 
 ---
 
-## KaneAI is the test author
+## What this is
 
-Every test in this pipeline is authored by **KaneAI** — LambdaTest's AI agent for browser test creation.
+A fully automated testing pipeline where **KaneAI** — LambdaTest's AI browser agent — authors every test case from a plain-English objective. No selectors. No scripts. No page objects.
 
-You give KaneAI a plain-English objective like:
+You give KaneAI an objective:
 
-> *"Go to automationexercise.com, search for 'jeans', and verify relevant products appear"*
+> *"Login to saucedemo as standard_user, add Sauce Labs Backpack to cart, and verify the button changes to 'Remove'."*
 
-KaneAI opens a real browser, figures out the UI, executes the steps, and either **exports production-ready Playwright code** (Flow 1) or **saves the test directly into Test Manager** (Flow 2).
-
-No selectors. No scripts. No page objects. KaneAI handles all of it.
+KaneAI opens a real browser, figures out the UI, executes the steps, and saves the verified test directly into LambdaTest Test Manager. HyperExecute runs it in parallel. If it fails, Claude explains why and rewrites the objective — automatically, before the next run.
 
 ---
 
-## Pipeline stages — step by step
+## The Pipeline
 
-### Stage 1 — Requirement Analysis _(Claude)_
-**Input:** Any `.txt` or `.md` file in `requirements/` — free text, user stories, bullet points, anything
-**What happens:** Claude reads all files and extracts structured Acceptance Criteria
+```
+Push to main  ──────────────────────────────────────────────────────────────►
+                                                                              │
+        [optional: requirements URL provided via manual dispatch]             │
+                    ↓                                                         │
+           Claude extracts ACs                                                │
+                    ↓                                                         │
+           Claude writes crisp objectives (max 5)                            │
+                    ↓                                                         │
+              committed to ci/objectives.json                                 │
+                                                                              │
+◄─────────────────────────────────────────────────────────────────────────────┘
+                    ↓
+         kane-cli runs each objective on a real browser (KaneAI)
+         ├── inline self-heal: if it fails, Claude rewrites + retries immediately
+         └── saves verified test to LambdaTest Test Manager
+                    ↓
+         Test Run created → linked to HyperExecute
+                    ↓
+         HyperExecute runs all tests in parallel (5 VMs)
+         └── pipeline polls until complete
+                    ↓
+         AI Root Cause Analysis
+         ├── LT AI RCA (when available)
+         └── Claude RCA fallback from authoring failure detail
+                    ↓
+         Traceability Matrix → GitHub Step Summary
+         └── includes Test Run Report link
+                    ↓
+         Auto-improve: Claude rewrites objectives for all failed SCs
+         └── commits improved objectives.json back to main [skip ci]
+```
+
+On the **next push**, the pipeline starts from the improved objectives automatically.
+
+---
+
+## Triggers
+
+| How | What happens |
+|-----|-------------|
+| **Push to `main`** (`ci/`, `requirements/`, `scenarios/`, `hyperexecute.yaml`) | Pipeline auto-runs using committed `objectives.json` |
+| **Manual dispatch — no URL** | Same as push — uses committed `objectives.json` |
+| **Manual dispatch + requirements URL** | Downloads doc → Claude extracts ACs → Claude generates objectives → full pipeline |
+
+> Auto-improve commits use `[skip ci]` in the message so they don't re-trigger the pipeline.
+
+---
+
+## Stage-by-stage
+
+### Stage 1 — Requirements Analysis *(runs only when a requirements URL is provided)*
+
+Claude reads the document and extracts Acceptance Criteria.
+
+**Supported URL formats:**
+
+| Source | Example URL | Requirement |
+|--------|-------------|-------------|
+| Google Docs | `docs.google.com/document/d/<ID>/edit` | Share → Anyone with link can view |
+| Google Drive file | `drive.google.com/file/d/<ID>/view` | Share → Anyone with link can view |
+| GitHub file | `github.com/user/repo/blob/main/reqs.md` | Public repo or raw URL |
+| GitHub Gist | `gist.github.com/user/<ID>` | Public gist |
+| Dropbox | `dropbox.com/s/.../file.txt?dl=0` | Shared link |
+| Any raw URL | `https://example.com/requirements.txt` | Publicly accessible |
+
+All formats are auto-detected and converted — paste the URL exactly as you'd share it.
+
 **Output:** `requirements/analyzed_requirements.json`
-```json
-[{ "id": "AC-001", "description": "User can add a product to cart and see count update",
-   "kane_steps": ["Navigate to product", "Click Add to Cart", "Assert cart count increments"],
-   "kane_one_liner": "Add to cart updates counter instantly" }]
+
+---
+
+### Stage 2 — Objective Generation *(runs only when a requirements URL is provided)*
+
+Claude generates up to 5 crisp, intent-based objectives from the extracted ACs.
+
+**Format enforced (strictly):**
+```
+Login to <url> as <user> with password <pass>, <one action>, and verify <one assertion>.
 ```
 
----
-
-### Stage 2 — Objective Generation _(Claude)_
-**Input:** `analyzed_requirements.json`
-**What happens:** Claude writes a precise, grounded kane-cli objective string for each AC — including the exact URL, UI actions, and assertion
-**Output:** `ci/objectives.json`
-```json
-[{ "id": "SC-001", "ac_id": "AC-001",
-   "objective": "Go to https://automationexercise.com/, search for 'Blue Top', click Add to Cart on the first result, and verify the cart count increases" }]
+**Good:**
+```
+Login to https://www.saucedemo.com/ as standard_user with password secret_sauce,
+add Sauce Labs Backpack to the cart, and verify the button changes to 'Remove'.
 ```
 
----
+**Bad (never do this):**
+```
+Navigate to the URL, type 'standard_user' into the username field, click the
+button below the '$29.99' price label, scroll down to find...
+```
 
-### Stage 3 — KaneAI Test Authoring _(kane-cli, Phase 1)_
-**Input:** `ci/objectives.json` — one objective per SC
-**What happens:** `kane-cli` runs each objective on a **real browser** using AI vision — no selectors, no pre-written scripts. KaneAI figures out the UI autonomously.
-
-- **Flow 1:** KaneAI exports Playwright Python code → saved to `~/.testmuai/kaneai/sessions/<id>/code-export/test.py`
-- **Flow 2:** KaneAI saves the test directly into LambdaTest Test Manager → returns a `testcase_id`
-
-**Output:** Session dirs with code exports (Flow 1) / TM test case IDs (Flow 2)
-**If a SC fails:** Failure detail saved to `ci/run_history.json` → Claude rewrites the objective on the next run (self-heal)
+**Output:** `ci/objectives.json` — committed to the repo for reuse across runs.
 
 ---
 
-### Stage 4 — Test Preparation _(Phase 2)_
+### Stage 3 — KaneAI Authoring *(Phase 1)*
 
-**Flow 1:** Transforms KaneAI's async code export → synchronous LT CDP Playwright test → writes to `tests/playwright/kane/SC-XXX/test.py`
+`kane-cli run` executes each objective on a real browser. KaneAI uses AI vision — no pre-written selectors or scripts. Each verified test is saved into LambdaTest Test Manager.
 
-**Flow 2:** Creates a Test Manager test run, sets environment (Win10 / Firefox), links all KaneAI test cases
-
----
-
-### Stage 5 — Parallel Execution _(HyperExecute, Phase 3)_
-**Input:** Test files (Flow 1) / TM test run (Flow 2)
-**What happens:** HyperExecute distributes tests across parallel VMs — all KaneAI-authored tests run simultaneously
-**Output:** HE job ID + job link → saved to `ci/he_jobs.json`
+- **2 SCs run in parallel**
+- **600s timeout per SC** — no step limit (kane-cli decides how many steps)
+- **Inline self-heal:** on failure, Claude reads the kane-cli failure detail and rewrites the objective, retrying immediately in the same run
+- **Cross-run self-heal:** `run_history.json` is saved as a GitHub artifact; on the next run it's restored and Claude pre-heals any objectives that failed last time before the run starts
 
 ---
 
-### Stage 6 — AI Root Cause Analysis _(LambdaTest AI)_
-**Input:** HE job ID
-**What happens:**
-1. `POST /insights/api/v3/public/rca/generate` — triggers LT AI RCA for all failed sessions in the job
-2. Wait 30s for async generation
-3. `GET /automation/api/v1/sessions/{id}/rca` — fetch RCA per failed session
-4. Claude Haiku summarises into 3 bullets: _what failed / why / how to fix_
+### Stage 4 — Test Run Creation *(Phase 2)*
 
-**Output:** `ci/rca_results.json` — SC-id → RCA text + session link
+Creates a LambdaTest Test Manager test run, links all authored test cases, and sets the execution environment.
+
+| Setting | Value |
+|---------|-------|
+| Environment | Windows 10, Firefox (latest), desktop web |
+| Concurrency | 5 parallel VMs |
+| Retry on failure | 1 retry |
+
+---
+
+### Stage 5 — HyperExecute Execution *(Phase 3)*
+
+Triggers HyperExecute via KaneAI TM API. The pipeline polls until the job reaches a final state before proceeding.
+
+**Output links (in Step Summary):**
+- HyperExecute job dashboard
+- 📋 Test Run Report (`test-manager.lambdatest.com/...?type=report`)
+
+---
+
+### Stage 6 — Root Cause Analysis
+
+Two-layer RCA for every failed scenario:
+
+**Layer 1 — LT AI RCA** (when sessions are indexed):
+- Triggers `POST /insights/api/v3/public/rca/generate`
+- Polls per-session RCA endpoint (404 → skips immediately, no retry loop)
+- Summarised to 3 bullets by Claude Haiku
+
+**Layer 2 — Claude RCA fallback** (always available):
+Uses the kane-cli authoring failure detail captured in Phase 1:
+```
+Objective:              what was asked of kane-cli
+What CLI did:           what the agent attempted / where it got stuck
+What needs to be done:  concrete fix to the objective or test
+```
+
+**Output:** `ci/rca_results.json`
 
 ---
 
 ### Stage 7 — Traceability Matrix
-**Input:** All pipeline data files (`objectives.json`, `run_history.json`, `tm_test_cases.json`, `he_jobs.json`, `rca_results.json`)
-**What happens:** Builds a live matrix linking every result back to its origin
-**Output:**
-- `reports/traceability_matrix.md` — full markdown table (appears in GitHub Step Summary)
-- `reports/demo_cache.json` — cached results for instant demo replay
+
+Full matrix linking every result back to its origin — appears in GitHub Step Summary after every run.
 
 ```
-Requirement → AC → KaneAI Objective → SC → HE Test → Result → AI RCA
+AC → Objective → SC → TM Test Case → HE Result → AI RCA
 ```
 
 ---
 
-## Edge cases handled
+### Stage 8 — Auto-Improve *(end of every run)*
 
-| Situation | How it's handled |
-|-----------|-----------------|
-| kane-cli SC times out | Marked `failed` in `run_history.json`; Claude rewrites objective on next run |
-| All SCs fail Phase 1 | Pipeline logs error and aborts before HE — no empty job submitted |
-| Code export missing for an SC | That SC is skipped in Phase 2; others still run on HE |
-| HE job ID not captured | RCA and traceability steps are skipped gracefully; results still saved |
-| RCA not ready in 30s | Traceability shows `—` for RCA; next run appends to existing results |
-| `analyzed_requirements.json` missing at `from_step=2` | `generate_objectives.py` exits with a clear error message |
-| `objectives.json` missing at `from_step=3` | `flow1_pipeline.py` falls back to hardcoded SC-001..SC-006 objectives |
-| Two pushes in quick succession | `concurrency` group in `flow1.yml` cancels the older run, keeps only the latest |
-| Flow 2 triggered on push | Flow 2 has **no push trigger** — manual only, prevents parallel kane-cli collisions |
-| Demo cache missing | `ci/demo.py` prints a clear message: _"Run a pipeline first"_ |
+After HE results and RCA are available, Claude rewrites objectives for **all failed SCs**:
+
+- Phase 1 authoring failure → uses kane-cli failure detail
+- HE execution failure → uses RCA text (LT AI or Claude)
+
+The improved `objectives.json` is committed back to `main` with `[skip ci]`. The next push automatically starts from better objectives.
 
 ---
 
-## GitHub Actions
+## Forking this repo
 
-| Workflow | Trigger | Time |
-|----------|---------|------|
-| **Flow 1** (`flow1.yml`) | Push to `requirements/` or `ci/`, or manual | ~15–20 min |
-| **Flow 1 Demo** (`flow1-demo.yml`) | Auto after Flow 1 completes, or manual | ~30 sec |
-| **Flow 2** (`flow2.yml`) | **Manual only** (no push trigger — prevents collision with Flow 1) | ~15–20 min |
-| **Flow 2 Demo** (`flow2-demo.yml`) | Auto after Flow 2 completes, or manual | ~30 sec |
+### 1. GitHub Secrets
 
-### `from_step` options (manual dispatch)
+Go to **Settings → Secrets and variables → Actions → New repository secret**
 
-| Value | Skips | Use when |
-|-------|-------|----------|
-| `1` (default) | Nothing | New or changed requirements |
-| `2` | Stage 1 (requirement analysis) | Requirements unchanged, re-generate objectives only |
-| `3` | Stages 1 + 2 (both Claude steps) | Objectives already exist, just re-run the pipeline |
+| Secret | Description | Where to get it |
+|--------|-------------|-----------------|
+| `LT_USERNAME` | LambdaTest account username | [accounts.lambdatest.com/security](https://accounts.lambdatest.com/security) |
+| `LT_ACCESS_KEY` | LambdaTest access key | [accounts.lambdatest.com/security](https://accounts.lambdatest.com/security) |
+| `ANTHROPIC_API_KEY` | Claude API key | [console.anthropic.com](https://console.anthropic.com) |
+| `KANE_PROJECT_ID` | KaneAI project ID | KaneAI → your project → Settings → copy the project ID |
+| `KANE_FOLDER_ID` | KaneAI folder ID | KaneAI → your project → Folders → select folder → copy ID |
 
----
+### 2. Code changes for your project
 
-## Setup
+Open `ci/flow2_pipeline.py` and update these two constants at the top:
 
-### 1. Add secrets
+```python
+PROJECT_ID    = "YOUR_KANE_PROJECT_ID"     # same as KANE_PROJECT_ID secret
+ENVIRONMENT_ID = YOUR_ENVIRONMENT_ID        # integer — see note below
+```
 
-**Settings → Secrets and variables → Actions**
+**Finding your `ENVIRONMENT_ID`:**  
+In LambdaTest Test Manager → Environments → create or select an environment → the ID appears in the URL or API response.
 
-| Secret | Where to find it |
-|--------|-----------------|
-| `LT_USERNAME` | https://accounts.lambdatest.com/security |
-| `LT_ACCESS_KEY` | https://accounts.lambdatest.com/security |
-| `ANTHROPIC_API_KEY` | https://console.anthropic.com |
-| `KANE_PROJECT_ID` | KaneAI → Project → Settings |
-| `KANE_FOLDER_ID` | KaneAI → Folder → Settings |
+### 3. Update objectives
 
-### 2. Push to trigger Flow 1
+Replace `ci/objectives.json` with objectives for your app:
+
+```json
+[
+  {
+    "id": "SC-001",
+    "ac_id": "AC-001",
+    "name": "SC-001: short description",
+    "objective": "Login to https://yourapp.com as user with password pass, do one thing, and verify one result."
+  }
+]
+```
+
+Keep objectives short and intent-based — one action, one assertion, credentials inline. See the [Objective format](#stage-2----objective-generation-runs-only-when-a-requirements-url-is-provided) section above.
+
+### 4. Push
 
 ```bash
 git push origin main
 ```
 
-Flow 2 runs manually: **Actions → Flow 2 — KaneAI TM API → Run workflow**
+Pipeline triggers automatically. Watch the run at **Actions → Agentic SDLC — KaneAI Pipeline**.
+
+---
+
+## Manual dispatch options
+
+**Actions → Agentic SDLC — KaneAI Pipeline → Run workflow**
+
+| Field | Options | Use when |
+|-------|---------|----------|
+| `requirements_url` | Any URL or blank | Provide a doc URL to generate new objectives; leave blank to use committed `objectives.json` |
+| `from_step` | `1`, `2`, `3` | `1` = full run with URL; `3` = skip to pipeline (default) |
 
 ---
 
@@ -159,48 +258,34 @@ Flow 2 runs manually: **Actions → Flow 2 — KaneAI TM API → Run workflow**
 
 ```bash
 pip install -r requirements.txt
+npm install -g @testmuai/kane-cli@latest
 
-# Full run — both flows
-ANTHROPIC_API_KEY=<key> LT_ACCESS_KEY=<key> python3 ci/run.py
+# Login and configure kane-cli
+kane-cli login --username $LT_USERNAME --access-key $LT_ACCESS_KEY
+kane-cli config project YOUR_KANE_PROJECT_ID
+kane-cli config folder  YOUR_KANE_FOLDER_ID
 
-# One flow only
-ANTHROPIC_API_KEY=<key> LT_ACCESS_KEY=<key> python3 ci/run.py --flow 1
-ANTHROPIC_API_KEY=<key> LT_ACCESS_KEY=<key> python3 ci/run.py --flow 2
+# Run the full pipeline
+LT_USERNAME=<u> LT_ACCESS_KEY=<k> ANTHROPIC_API_KEY=<k> python3 ci/flow2_pipeline.py
 
-# Skip Claude stages, re-run pipeline only
-LT_ACCESS_KEY=<key> python3 ci/run.py --from-step 3 --flow 1
+# Run a single SC for testing
+LT_USERNAME=<u> LT_ACCESS_KEY=<k> ANTHROPIC_API_KEY=<k> python3 ci/flow2_pipeline.py --sc SC-001
 
-# Show results from last run (instant — no re-run)
-python3 ci/demo.py
-
-# Show results + open HyperExecute dashboard in browser
-python3 ci/demo.py --open
+# Skip Phase 1 (reuse last kane-cli sessions)
+LT_USERNAME=<u> LT_ACCESS_KEY=<k> python3 ci/flow2_pipeline.py --skip-phase1
 ```
 
 ---
 
-## Adding requirements
+## Edge cases
 
-Drop any `.txt` or `.md` file into `requirements/`. No format required:
-
-```
-# requirements/checkout.md
-
-Users should be able to add items to cart and see the count update.
-On the cart page, item names and prices must be visible.
-Removing an item should clear it from the cart immediately.
-```
-
-Push → Flow 1 triggers → Claude reads it → KaneAI authors new tests → HyperExecute runs them → traceability matrix updates.
-
----
-
-## What makes this different
-
-- **KaneAI authors every test** — no human writes selectors, scripts, or page objects; KaneAI uses AI vision to interact with the real UI
-- **KaneAI is the only tool** that verifies requirements against a live site *and* generates production-ready tests from that verification
-- **Two KaneAI output paths** — Flow 1 gets Playwright code export; Flow 2 gets Test Manager test cases — same AI author, two execution strategies
-- **Self-healing** — when a KaneAI test fails, Claude rewrites the objective and KaneAI re-authors it on the next run
-- **Full traceability** — every HyperExecute result links back to the KaneAI test, the objective, and the original acceptance criterion
-- **AI root cause analysis** — LambdaTest AI explains each failure in 3 bullets: what failed, why, how to fix it
-- **Demo in 30 seconds** — the demo workflow shows real results from the last KaneAI run without re-running anything
+| Situation | Behaviour |
+|-----------|-----------|
+| kane-cli SC fails authoring | Inline Claude heal + immediate retry; cross-run heal on next push |
+| All SCs fail Phase 1 | Pipeline aborts before creating HE job |
+| LT AI RCA unavailable (`triggered=0`) | Claude generates RCA from kane-cli failure detail |
+| RCA session returns 404 | Skipped instantly — no retry loop |
+| HE not finished when RCA runs | Pipeline polls until all sessions reach final state |
+| Auto-improve commit pushes to main | `[skip ci]` prevents re-triggering the pipeline |
+| First run (no prior artifact) | Cross-run heal step skips gracefully |
+| Requirements URL is a private Google Doc | Download fails — make the doc publicly shared first |

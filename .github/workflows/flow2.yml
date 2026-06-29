@@ -11,6 +11,7 @@ name: "Flow 2 — KaneAI TM API"
 on:
   push:
     branches: [main]
+    # [skip ci] in commit message prevents infinite loop from auto-improve commits
     paths:
       - "requirements/**"
       - "ci/**"
@@ -37,6 +38,8 @@ jobs:
   flow2-pipeline:
     name: "Flow 2 · KaneAI → Test Manager → HyperExecute"
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed for auto-improve git commit + push
 
     steps:
       - uses: actions/checkout@v4
@@ -69,7 +72,7 @@ jobs:
           google-chrome --version
 
       - name: Install kane-cli
-        run: npm install -g @testmuai/kane-cli
+        run: npm install -g @testmuai/kane-cli@latest
 
       - name: Configure kane-cli
         env:
@@ -85,31 +88,90 @@ jobs:
       - name: Ensure output directories
         run: mkdir -p reports logs requirements
 
+      - name: Restore run history from last flow2 artifact
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN_ID=$(gh run list --workflow=flow2.yml --branch=main --status=success --limit=1 --json databaseId -q '.[0].databaseId' 2>/dev/null || echo "")
+          if [ -n "$RUN_ID" ]; then
+            echo "Restoring run_history.json from run $RUN_ID"
+            gh run download "$RUN_ID" --name "flow2-results-*" --dir /tmp/prev-artifacts 2>/dev/null || true
+            HIST=$(find /tmp/prev-artifacts -name "run_history.json" | head -1)
+            [ -n "$HIST" ] && cp "$HIST" ci/run_history.json && echo "Restored run_history.json"
+            REQS=$(find /tmp/prev-artifacts -name "analyzed_requirements.json" | head -1)
+            [ -n "$REQS" ] && cp "$REQS" requirements/analyzed_requirements.json && echo "Restored analyzed_requirements.json"
+            RHASH=$(find /tmp/prev-artifacts -name ".requirements_hash" | head -1)
+            [ -n "$RHASH" ] && cp "$RHASH" requirements/.requirements_hash && echo "Restored .requirements_hash"
+            OHASH=$(find /tmp/prev-artifacts -name ".objectives_hash" | head -1)
+            [ -n "$OHASH" ] && cp "$OHASH" ci/.objectives_hash && echo "Restored .objectives_hash"
+            if [ -z "$HIST" ]; then echo "No previous artifact found — starting fresh"; fi
+          else
+            echo "No previous successful flow2 run found — starting fresh"
+          fi
+
       - name: "Download requirements doc from URL (if provided)"
         if: ${{ inputs.requirements_url != '' }}
         run: |
+          # Clear previous requirements docs so new app reqs don't mix with old ones
+          find requirements/ -maxdepth 1 \( -name "*.txt" -o -name "*.md" \) -delete
+          echo "Cleared old requirements files"
+
           URL="${{ inputs.requirements_url }}"
-          echo "Downloading requirements from: $URL"
+          echo "Input URL: $URL"
 
-          if echo "$URL" | grep -q "drive.google.com/file"; then
-            FILE_ID=$(echo "$URL" | grep -oP '(?<=/d/)[^/]+')
-            URL="https://drive.google.com/uc?export=download&id=${FILE_ID}"
-            echo "Converted to Google Drive direct download URL"
-          fi
-
+          # ── Google Docs (docs.google.com/document/d/<ID>) ─────────────────
           if echo "$URL" | grep -q "docs.google.com/document"; then
-            DOC_ID=$(echo "$URL" | grep -oP '(?<=/d/)[^/]+')
+            DOC_ID=$(echo "$URL" | grep -oP '(?<=/d/)[^/?]+')
             URL="https://docs.google.com/document/d/${DOC_ID}/export?format=txt"
-            echo "Converted to Google Docs export URL"
+            echo "→ Google Docs export URL"
+
+          # ── Google Drive file (drive.google.com/file/d/<ID>) ──────────────
+          elif echo "$URL" | grep -q "drive.google.com"; then
+            FILE_ID=$(echo "$URL" | grep -oP '(?<=/d/)[^/?]+')
+            # Use export download — handles large files by bypassing virus-scan warning
+            URL="https://drive.google.com/uc?export=download&id=${FILE_ID}&confirm=t"
+            echo "→ Google Drive direct download"
+
+          # ── GitHub blob URL (github.com/.../blob/...) ─────────────────────
+          elif echo "$URL" | grep -qP "github\.com/.+/blob/"; then
+            URL=$(echo "$URL"               | sed 's|github\.com|raw.githubusercontent.com|'               | sed 's|/blob/|/|')
+            echo "→ GitHub raw URL"
+
+          # ── GitHub Gist ───────────────────────────────────────────────────
+          elif echo "$URL" | grep -q "gist.github.com"; then
+            GIST_ID=$(echo "$URL" | grep -oP '[a-f0-9]{20,}')
+            URL="https://gist.githubusercontent.com/raw/${GIST_ID}"
+            echo "→ GitHub Gist raw"
+
+          # ── Dropbox ───────────────────────────────────────────────────────
+          elif echo "$URL" | grep -q "dropbox.com"; then
+            URL=$(echo "$URL" | sed 's/[?&]dl=0/\&dl=1/g')
+            URL="${URL}&dl=1"
+            URL=$(echo "$URL" | sed 's/&&/\&/g')
+            echo "→ Dropbox direct download"
+
+          else
+            echo "→ Raw URL (using as-is)"
           fi
 
-          if echo "$URL" | grep -q "dropbox.com"; then
-            URL=$(echo "$URL" | sed 's/?dl=0/?dl=1/g' | sed 's/&dl=0/\&dl=1/g')
-          fi
-
+          echo "Resolved URL: $URL"
           FILENAME="requirements/uploaded_$(date +%Y%m%d_%H%M%S).txt"
-          curl -fsSL "$URL" -o "$FILENAME"
-          echo "Saved to $FILENAME ($(wc -c < $FILENAME) bytes)"
+
+          HTTP_CODE=$(curl -fsSL "$URL" -o "$FILENAME" -w "%{http_code}" 2>&1) || true
+          if [ ! -s "$FILENAME" ]; then
+            echo "ERROR: Download failed or file is empty (HTTP $HTTP_CODE)"
+            echo "Make sure the document is publicly shared (Anyone with the link can view)"
+            exit 1
+          fi
+
+          BYTES=$(wc -c < "$FILENAME")
+          echo "Saved to $FILENAME ($BYTES bytes)"
+          if [ "$BYTES" -lt 50 ]; then
+            echo "ERROR: File too small — may be a login redirect page, not the actual document"
+            cat "$FILENAME"
+            exit 1
+          fi
           head -20 "$FILENAME"
 
       - name: "Step 1 — Analyze requirements (Claude)"
@@ -156,4 +218,7 @@ jobs:
             ci/rca_results.json
             ci/tm_test_cases.json
             logs/
+            requirements/analyzed_requirements.json
+            requirements/.requirements_hash
+            ci/.objectives_hash
           retention-days: 30

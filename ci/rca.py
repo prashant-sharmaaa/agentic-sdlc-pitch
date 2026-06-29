@@ -124,6 +124,10 @@ def fetch_sessions_for_build(build_name: str, log=None) -> list:
         sid    = s.get("session_id", "") or s.get("id", "")
         status = s.get("status_ind", s.get("status", ""))
         link   = s.get("session_url", "") or s.get("public_url", "")
+        # Client-side filter — API may return all account sessions regardless of build_name param
+        s_build = s.get("build_name", "") or s.get("build", "")
+        if build_name and s_build and build_name.lower() not in s_build.lower():
+            continue
         result.append({"session_id": sid, "name": name, "status": status, "session_link": link})
 
     if log:
@@ -235,6 +239,10 @@ def update_history_from_he(build_name: str, flow: str = "flow2", log=None) -> di
             history[sc_id]["status"]       = he_status
             history[sc_id]["flow"]         = flow
             history[sc_id]["session_link"] = s.get("session_link", "")
+            # Preserve Phase 1 failure_detail — HE failures have no detail of their own.
+            # If authoring passed (detail empty) mark source so healing skips it.
+            if he_status == "failed" and not history[sc_id].get("failure_detail", "").strip():
+                history[sc_id]["failure_detail"] = f"[HE execution failed — session: {s.get('session_link', '')}]"
         updated[sc_id] = he_status
 
     if updated:
@@ -271,6 +279,69 @@ def _poll_session_rca(session_id: str, sc_id: str, timeout: int = 120, interval:
     _log(f"[rca] {sc_id} RCA timed out after {timeout}s — no data available")
     return ""
 
+
+
+HISTORY_FILE = CI_DIR / "run_history.json"
+
+
+def _claude_rca_from_history(sc_ids: list, log=None) -> dict:
+    """
+    Generate RCA for failed SCs using Claude when LT AI RCA is unavailable.
+    Reads failure_detail from run_history.json and summarises per SC.
+    Returns {sc_id: rca_text}.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key or not HISTORY_FILE.exists():
+        return {}
+
+    history = json.loads(HISTORY_FILE.read_text())
+    results = {}
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+    except Exception:
+        return {}
+
+    for sc_id in sc_ids:
+        info = history.get(sc_id, {})
+        if info.get("status") == "passed":
+            continue
+        detail = info.get("failure_detail", "")
+        objective = info.get("objective", "")
+        if not detail:
+            continue
+
+        # Extract run_end narrative vs raw tail if embedded by run_kane()
+        run_summary = ""
+        raw_tail = detail
+        if "[run summary]:" in detail:
+            parts = detail.split("\n[raw tail]:", 1)
+            run_summary = parts[0].replace("[run summary]:", "").strip()
+            raw_tail = parts[1].strip() if len(parts) > 1 else ""
+
+        try:
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=300,
+                messages=[{"role": "user", "content": (
+                    f"kane-cli failed to author a browser test for {sc_id}.\n\n"
+                    f"**Objective given to kane-cli:**\n{objective[:300]}\n\n"
+                    f"**What kane-cli did (run summary):**\n{run_summary or raw_tail[-600:]}\n\n"
+                    "Respond in exactly this format — no other text:\n"
+                    "**Objective:** <one line restating what was asked>\n"
+                    "**What CLI did:** <one line — what kane-cli actually attempted or where it got stuck>\n"
+                    "**What needs to be done:** <one line — concrete fix to the objective or test>"
+                )}],
+            )
+            results[sc_id] = resp.content[0].text.strip()
+            msg = f"[rca] {sc_id} Claude RCA → {results[sc_id][:80]}..."
+            print(msg) if not log else log.info(msg)
+        except Exception as e:
+            msg = f"[rca] {sc_id} Claude RCA error: {e}"
+            print(msg) if not log else log.warning(msg)
+
+    return results
 
 def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None) -> dict:
     """
@@ -312,6 +383,35 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None) -> dict:
         time.sleep(15)
 
     results = dict(existing)
+
+    # If LT AI RCA trigger returned 0 (Flow 2 KaneAI TM sessions not indexed),
+    # fall back to Claude-generated RCA from kane-cli failure_detail in run_history
+    if triggered == 0:
+        msg = "[rca] triggered=0 — LT AI RCA unavailable; generating Claude RCA from failure details"
+        print(msg) if not log else log.info(msg)
+        failed_sc_ids = [_session_to_sc_id(s["name"]) for s in sessions
+                         if s["status"] in ("failed", "error") and _session_to_sc_id(s["name"])]
+        # Also include any SC IDs from run_history that failed (in case sessions are filtered out)
+        if HISTORY_FILE.exists():
+            hist = json.loads(HISTORY_FILE.read_text())
+            for sc_id, info in hist.items():
+                if info.get("status") != "passed" and sc_id not in failed_sc_ids:
+                    failed_sc_ids.append(sc_id)
+        claude_rcas = _claude_rca_from_history(failed_sc_ids, log)
+        for sc_id, rca_text in claude_rcas.items():
+            results[sc_id] = {
+                "rca":          rca_text,
+                "raw":          "",
+                "session_link": next((s["session_link"] for s in sessions
+                                      if _session_to_sc_id(s["name"]) == sc_id), ""),
+                "session_id":   "",
+                "source":       "claude-fallback",
+            }
+        RCA_FILE.write_text(json.dumps(results, indent=2))
+        msg = f"[rca] Saved {len(results)} Claude RCA entries to {RCA_FILE.name}"
+        print(msg) if not log else log.info(msg)
+        return results
+
     for s in sessions:
         if s["status"] not in ("failed", "error"):
             continue

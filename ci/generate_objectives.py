@@ -119,6 +119,16 @@ def main():
         ac_text=ac_text,
     )
 
+    # Skip if objectives already exist for this exact set of ACs
+    import hashlib
+    ac_hash = hashlib.sha256(json.dumps(acs, sort_keys=True).encode()).hexdigest()[:16]
+    HASH_FILE = OUTPUT_FILE.parent / ".objectives_hash"
+    cached = HASH_FILE.read_text().strip() if HASH_FILE.exists() else ""
+    if ac_hash == cached and OUTPUT_FILE.exists() and "--force" not in __import__("sys").argv:
+        print(f"[objectives] ACs unchanged (hash={ac_hash}) — skipping Claude generation")
+        print(f"[objectives] Using existing {OUTPUT_FILE.name} (pass --force to regenerate)")
+        return
+
     print(f"[objectives] Generating objectives for {len(acs)} ACs with Claude ({MODEL})...")
     resp = client.messages.create(
         model=MODEL,
@@ -148,6 +158,7 @@ def main():
         return
 
     OUTPUT_FILE.write_text(json.dumps(objectives, indent=2))
+    HASH_FILE.write_text(ac_hash)
     print(f"\n[objectives] Written to {OUTPUT_FILE.name}")
 
 

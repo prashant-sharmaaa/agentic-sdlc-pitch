@@ -63,13 +63,27 @@ Requirements:
 
 
 def _load_requirements_text() -> str:
-    """Read all .txt and .md files from requirements/ (excluding .json)."""
-    texts = []
+    """Read requirements files from requirements/.
+
+    If any uploaded_* files exist (from a manual dispatch with a URL),
+    use ONLY those — skip committed default files like saucedemo_requirements.md
+    so new app requirements are not mixed with the defaults.
+    """
+    all_files = []
     for ext in ("*.txt", "*.md"):
-        for f in sorted(REQUIREMENTS_DIR.glob(ext)):
-            content = f.read_text(encoding="utf-8").strip()
-            if content:
-                texts.append(f"=== {f.name} ===\n{content}")
+        all_files.extend(sorted(REQUIREMENTS_DIR.glob(ext)))
+
+    # Prefer uploaded files when present
+    uploaded = [f for f in all_files if f.stem.startswith("uploaded_")]
+    files_to_read = uploaded if uploaded else all_files
+
+    texts = []
+    for f in files_to_read:
+        content = f.read_text(encoding="utf-8").strip()
+        if content:
+            texts.append(f"=== {f.name} ===\n{content}")
+        print(f"[analyze] Reading: {f.name}" + (" (uploaded)" if f in uploaded else " (default)"))
+
     return "\n\n".join(texts)
 
 
@@ -126,14 +140,23 @@ def main():
                         help="Print extracted ACs to stdout")
     args = parser.parse_args()
 
+    import hashlib, sys as _sys
     REQUIREMENTS_DIR.mkdir(exist_ok=True)
 
     raw_text = _load_requirements_text()
     if not raw_text:
         print("[analyze] ERROR: No .txt or .md files found in requirements/", file=sys.stderr)
-        print("  Drop any requirements document into the requirements/ folder and re-run.",
-              file=sys.stderr)
         sys.exit(1)
+
+    # ── URL/content cache: skip Claude if same requirements as last run ────────
+    CACHE_FILE = REQUIREMENTS_DIR / ".requirements_hash"
+    content_hash = hashlib.sha256(raw_text.encode()).hexdigest()[:16]
+    cached_hash  = CACHE_FILE.read_text().strip() if CACHE_FILE.exists() else ""
+
+    if content_hash == cached_hash and OUTPUT_FILE.exists() and "--force" not in sys.argv:
+        print(f"[analyze] Requirements unchanged (hash={content_hash}) — skipping Claude analysis")
+        print(f"[analyze] Using existing {OUTPUT_FILE.name} (pass --force to re-analyse)")
+        return
 
     print(f"[analyze] Found requirements text ({len(raw_text)} chars) — extracting ACs with Claude")
 
@@ -141,6 +164,7 @@ def main():
 
     output = {"base_url": base_url, "acceptance_criteria": acs}
     OUTPUT_FILE.write_text(json.dumps(output, indent=2), encoding="utf-8")
+    CACHE_FILE.write_text(content_hash)
     print(f"[analyze] Extracted {len(acs)} acceptance criteria → {OUTPUT_FILE.relative_to(PROJECT_ROOT)}")
     if base_url:
         print(f"[analyze] App URL: {base_url}")

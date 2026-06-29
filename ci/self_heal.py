@@ -28,35 +28,26 @@ from datetime import datetime
 from pathlib import Path
 
 HISTORY_FILE   = Path(__file__).parent / "run_history.json"
+RCA_FILE       = Path(__file__).parent / "rca_results.json"
 OBJECTIVES_FILE = Path(__file__).parent / "objectives.json"
 MODEL          = "claude-sonnet-4-6"
 
 SYSTEM_PROMPT = """\
 You are a QA automation expert fixing failing browser test objectives for kane-cli.
 
-kane-cli executes natural-language objectives as headless browser tests on www.saucedemo.com.
+kane-cli executes natural-language objectives as headless browser tests on a real browser.
 A previous objective failed — you must rewrite it to be more robust.
 
-Key facts about www.saucedemo.com:
-- Login page: https://www.saucedemo.com/ — username: 'standard_user', password: 'secret_sauce'
-- After login, inventory page: https://www.saucedemo.com/inventory.html
-- Each product tile has an 'Add to cart' button; after clicking it the button text changes to 'Remove'
-- Cart badge appears in top-right navigation showing item count
-- Cart page: https://www.saucedemo.com/cart.html — navigate directly by URL, do not click cart icon
-- Sort dropdown (top-right of inventory): options include 'Name (A to Z)', 'Name (Z to A)',
-  'Price (low to high)', 'Price (high to low)'
-- Cheapest product: 'Sauce Labs Onesie' at $7.99; alphabetically first: 'Sauce Labs Backpack'
-- Product detail page: click the product name or image from inventory
-- NO search bar, NO category sidebar, NO modals after add-to-cart
-
 RULES for rewriting:
-1. ALWAYS start from https://www.saucedemo.com/ and log in first — no page is accessible without login.
-2. Be specific about element targets — reference visible button text, labels, or position hints.
-3. NEVER assert on cart badge count — assert the button text changed (e.g. reads 'Remove').
-4. For cart page: navigate directly to https://www.saucedemo.com/cart.html, assert product name or price.
-5. Use specific stable values: product name 'Sauce Labs Backpack', price '$29.99'.
-6. Up to 20 UI actions are allowed — do not artificially restrict steps.
-7. One sentence only, starts with the full URL (https://www.saucedemo.com/), ends with a specific assertion.
+1. Keep the same app URL, credentials, and intent as the original objective.
+2. Be high-level and intent-based — state WHAT to verify, not HOW to click each element.
+   kane-cli figures out the exact interactions itself.
+3. One sentence only: login (if required) + one action + one "and verify ..." assertion.
+4. Do not add spatial hints, price coordinates, or element positions.
+5. Do not add step counts or micro-instructions.
+6. Reference visible text labels for buttons and links (e.g. 'Add to cart', 'Remove').
+7. If the failure suggests a timing issue, simplify — remove intermediate steps.
+8. Credentials must stay inline in the objective if the original had them.
 """
 
 
@@ -126,14 +117,27 @@ def save_history(kane_results: list, flow: str = "flow"):
     HISTORY_FILE.write_text(json.dumps(history, indent=2))
 
 
-def heal_objectives(history: dict, log=None) -> int:
+def heal_objectives(history: dict, log=None, rca_results: dict = None) -> int:
     """
     For each SC that failed last run, ask Claude to rewrite the objective.
     Updates ci/objectives.json in place.
     Returns number of objectives healed.
     """
-    failed = {sc_id: info for sc_id, info in history.items()
-              if info.get("status") not in ("passed", None) or info.get("status") is None}
+    # Load rca_results for HE failure context if not passed in
+    if rca_results is None:
+        rca_results = json.loads(RCA_FILE.read_text()) if RCA_FILE.exists() else {}
+
+    # Heal all failed SCs — Phase 1 failures use failure_detail,
+    # HE-only failures use RCA text as context
+    failed = {}
+    for sc_id, info in history.items():
+        if info.get("status") in ("passed", None):
+            continue
+        detail = info.get("failure_detail", "").strip()
+        rca_text = rca_results.get(sc_id, {}).get("rca", "") if rca_results else ""
+        # Include if we have any context — authoring detail OR RCA
+        if detail or rca_text:
+            failed[sc_id] = {**info, "_rca": rca_text}
 
     if not failed:
         if log:
@@ -179,17 +183,19 @@ def heal_objectives(history: dict, log=None) -> int:
         if log:
             log.warning(f"[self-heal] {sc_id} failed last run — asking Claude to rewrite objective")
 
-        prompt = f"""The following kane-cli objective failed on the previous pipeline run.
+        rca_text = info.get("_rca", "")
+        context = run_summary or (failure_detail[-600:] if failure_detail else "")
+        if not context and rca_text:
+            context = f"[HE execution failure — AI RCA]: {rca_text}"
+
+        prompt = f"""The following test objective failed on the previous pipeline run.
 
 SC ID: {sc_id}
 Failed objective:
 {old_objective}
 
-What kane-cli actually did (run summary):
-{run_summary if run_summary else '(not available)'}
-
-Raw failure detail:
-{failure_detail[-600:] if len(failure_detail) > 600 else failure_detail}
+What happened:
+{context or "(no detail available)"}
 
 Rewrite the objective to fix the issue. Apply the critical rules from your system prompt.
 Return ONLY the new objective string — no quotes, no explanation."""
