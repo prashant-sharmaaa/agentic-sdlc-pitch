@@ -363,11 +363,17 @@ def phase1_run_objectives(objectives=None):
     objs = list(objectives or SC_OBJECTIVES)
     results = [None] * len(objs)
 
-    # Infrastructure failure keywords: transient browser/CDP issues, NOT objective logic failures
+    # Infrastructure failure keywords: only genuine transient browser/CDP issues.
+    # Keep narrow — broad matches (e.g. bare "screenshot") cause false positives
+    # that trigger unnecessary retries and get stuck on bifurcation.
     _INFRA_KEYWORDS = (
-        "screenshot failed", "screenshot", "cdp", "browser crash",
-        "connection reset", "network error", "socket", "disconnected",
-        "task was not confirmed",  # reached target page but run ended prematurely
+        "screenshot failed",       # explicit screenshot capture crash
+        "cdp disconnected",        # Chrome DevTools Protocol lost
+        "browser crashed",
+        "connection reset by peer",
+        "socket hang up",
+        "econnreset",
+        "net::err_",               # Chrome network errors
     )
 
     def _is_infra_failure(detail: str) -> bool:
