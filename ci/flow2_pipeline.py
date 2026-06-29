@@ -363,23 +363,42 @@ def phase1_run_objectives(objectives=None):
     objs = list(objectives or SC_OBJECTIVES)
     results = [None] * len(objs)
 
+    # Infrastructure failure keywords: transient browser/CDP issues, NOT objective logic failures
+    _INFRA_KEYWORDS = (
+        "screenshot failed", "screenshot", "cdp", "browser crash",
+        "connection reset", "network error", "socket", "disconnected",
+        "task was not confirmed",  # reached target page but run ended prematurely
+    )
+
+    def _is_infra_failure(detail: str) -> bool:
+        d = (detail or "").lower()
+        return any(kw in d for kw in _INFRA_KEYWORDS)
+
     def _run(idx, sc):
         status, session_id, failure_detail = run_kane(sc)
         healed = False
-        # Inline retry: if failed, ask Claude to rewrite objective and try once more
+
         if status != "passed" and failure_detail:
-            log.warning(f"[{sc['id']}] authoring failed — attempting inline heal + retry")
-            healed_obj = heal_single_objective(sc, failure_detail, log)
-            if healed_obj:
-                sc_retry = {**sc, "objective": healed_obj}
-                s2, sid2, fd2 = run_kane(sc_retry)
-                if s2 == "passed":
-                    log.info(f"[{sc['id']}] retry PASSED with healed objective")
-                    status, session_id, failure_detail = s2, sid2, fd2
-                    sc = sc_retry
-                    healed = True
-                else:
-                    log.warning(f"[{sc['id']}] retry also failed")
+            # Tier 1: transient infra failure (screenshot crash, CDP disconnect, etc.)
+            # Retry with the SAME objective — no healing needed
+            if _is_infra_failure(failure_detail):
+                log.warning(f"[{sc['id']}] transient infra failure detected — retrying with same objective (no heal)")
+                status, session_id, failure_detail = run_kane(sc)
+
+            # Tier 2: still failing after infra-retry → logic failure → heal + retry
+            if status != "passed" and failure_detail:
+                log.warning(f"[{sc['id']}] authoring failed — attempting inline heal + retry")
+                healed_obj = heal_single_objective(sc, failure_detail, log)
+                if healed_obj:
+                    sc_retry = {**sc, "objective": healed_obj}
+                    s2, sid2, fd2 = run_kane(sc_retry)
+                    if s2 == "passed":
+                        log.info(f"[{sc['id']}] retry PASSED with healed objective")
+                        status, session_id, failure_detail = s2, sid2, fd2
+                        sc = sc_retry
+                        healed = True
+                    else:
+                        log.warning(f"[{sc['id']}] retry also failed")
         tc_id = get_testcase_id_from_session(session_id)
         return idx, {
             "sc_id":          sc["id"],
