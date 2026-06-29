@@ -227,20 +227,30 @@ def update_history_from_he(build_name: str, flow: str = "flow2", log=None) -> di
         sc_id = _session_to_sc_id(s["name"])
         _log(f"[rca]   session '{s['name']}' → sc_id='{sc_id}' status={s['status']}")
 
-    history = json.loads(HISTORY_FILE.read_text()) if HISTORY_FILE.exists() else {}
-
-    updated = {}
+    # Deduplicate sessions by sc_id — "passed" wins over "failed".
+    # HE retries create multiple sessions per SC; if any attempt passed, the SC passed.
+    best: dict = {}  # sc_id → best session dict
     for s in sessions:
         sc_id = _session_to_sc_id(s["name"])
         if not sc_id:
             continue
         he_status = "passed" if s["status"] == "passed" else "failed"
+        prev = best.get(sc_id)
+        if prev is None or (prev["_status"] != "passed" and he_status == "passed"):
+            best[sc_id] = {**s, "_status": he_status}
+
+    _log(f"[rca] After deduplication: {len(best)} unique SC(s) — {dict((k, v['_status']) for k, v in best.items())}")
+
+    history = json.loads(HISTORY_FILE.read_text()) if HISTORY_FILE.exists() else {}
+
+    updated = {}
+    for sc_id, s in best.items():
+        he_status = s["_status"]
         if sc_id in history:
             history[sc_id]["status"]       = he_status
             history[sc_id]["flow"]         = flow
             history[sc_id]["session_link"] = s.get("session_link", "")
             # Preserve Phase 1 failure_detail — HE failures have no detail of their own.
-            # If authoring passed (detail empty) mark source so healing skips it.
             if he_status == "failed" and not history[sc_id].get("failure_detail", "").strip():
                 history[sc_id]["failure_detail"] = f"[HE execution failed — session: {s.get('session_link', '')}]"
         updated[sc_id] = he_status
@@ -389,9 +399,17 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None) -> dict:
     if triggered == 0:
         msg = "[rca] triggered=0 — LT AI RCA unavailable; generating Claude RCA from failure details"
         print(msg) if not log else log.info(msg)
-        failed_sc_ids = [_session_to_sc_id(s["name"]) for s in sessions
-                         if s["status"] in ("failed", "error") and _session_to_sc_id(s["name"])]
-        # Also include any SC IDs from run_history that failed (in case sessions are filtered out)
+        # Deduplicate sessions by sc_id, passed wins — mirrors update_history_from_he logic
+        _best: dict = {}
+        for s in sessions:
+            sc_id = _session_to_sc_id(s["name"])
+            if not sc_id:
+                continue
+            st = "passed" if s["status"] == "passed" else "failed"
+            if sc_id not in _best or (_best[sc_id]["_st"] != "passed" and st == "passed"):
+                _best[sc_id] = {**s, "_st": st}
+        failed_sc_ids = [sid for sid, sv in _best.items() if sv["_st"] in ("failed", "error")]
+        # Also include any SC IDs from run_history that HE marked as failed
         if HISTORY_FILE.exists():
             hist = json.loads(HISTORY_FILE.read_text())
             for sc_id, info in hist.items():

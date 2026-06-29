@@ -73,7 +73,7 @@ jobs:
         run: |
           kane-cli login --username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY"
           kane-cli install skill
-          kane-cli config project ${{ secrets.KANE_PROJECT_ID }}
+          kane-cli config project 01KVXJ82AKT83GWJNFZTQVMNRQ
           kane-cli config folder  ${{ secrets.KANE_FOLDER_ID }}
           kane-cli whoami
 
