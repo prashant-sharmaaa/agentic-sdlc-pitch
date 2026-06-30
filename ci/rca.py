@@ -106,11 +106,13 @@ RCA_FETCH_URL = "https://api.lambdatest.com/insights/api/v3/public/rca"
 
 def _fetch_rca_by_job(job_id: str, log=None) -> list:
     """
-    POST /insights/api/v3/public/rca with job_ids=[job_id].
+    GET /insights/api/v3/public/rca?job_ids=<job_id>
     Returns list of RCA entries: [{test_id, rca_detail, ...}].
     test_id matches the session_id from the sessions API.
     """
-    resp = _request("POST", RCA_FETCH_URL, {"job_ids": [job_id]}) or {}
+    import urllib.parse
+    url  = f"{RCA_FETCH_URL}?{urllib.parse.urlencode({'job_ids': job_id})}"
+    resp = _request("GET", url) or {}
     entries = resp.get("data", [])
     if log:
         log.info(f"[rca] Fetched {len(entries)} LT AI RCA entries for job {job_id}")
@@ -398,6 +400,10 @@ def _claude_rca_from_history(sc_ids: list, log=None) -> dict:
         info = history.get(sc_id, {})
         if info.get("status") == "passed":
             continue
+        # Only generate Claude RCA for Phase 1 authoring failures.
+        # If authoring succeeded, LT AI RCA (not Claude) is the right source.
+        if info.get("authoring_status") == "passed":
+            continue
         detail = info.get("failure_detail", "")
         objective = info.get("objective", "")
         if not detail:
@@ -448,7 +454,7 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None, tc_to_sc:
     Flow:
       1. Trigger LT AI RCA generation (or confirm already generated)
       2. Fetch sessions to build session_id → sc_id mapping
-      3. Fetch LT AI RCA via POST /insights/api/v3/public/rca with job_ids
+      3. Fetch LT AI RCA via GET /insights/api/v3/public/rca?job_ids=<job_id>
          (test_id in RCA response == session_id from sessions API)
       4. Format rca_detail directly — no Claude summarisation needed
       5. Claude fallback ONLY for Phase 1 authoring failures with real failure_detail
@@ -504,6 +510,11 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None, tc_to_sc:
     # test_id in the RCA response == session_id from the sessions API
     if lt_rca_available:
         rca_entries = _fetch_rca_by_job(job_id, log)
+        # If newly triggered and not yet ready, retry once after 30s
+        if not rca_entries and newly_triggered > 0:
+            _log("[rca] No entries yet — waiting 30s and retrying fetch...")
+            time.sleep(30)
+            rca_entries = _fetch_rca_by_job(job_id, log)
         for entry in rca_entries:
             test_id    = entry.get("test_id", "")
             rca_detail = entry.get("rca_detail", {})
@@ -539,6 +550,9 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None, tc_to_sc:
         hist = json.loads(HISTORY_FILE.read_text())
         for sc_id, info in hist.items():
             if info.get("status") == "passed":
+                continue
+            # Only Phase 1 authoring failures — not HE execution failures
+            if info.get("authoring_status") == "passed":
                 continue
             detail = info.get("failure_detail", "")
             if detail and not detail.startswith("[HE execution failed"):
