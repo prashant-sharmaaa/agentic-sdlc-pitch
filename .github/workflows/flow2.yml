@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       requirements_url:
-        description: "URL to requirements doc (Google Doc export, Notion, Dropbox, raw URL). Leave blank to use existing requirements/ files."
+        description: "URL to requirements doc (Google Doc, Dropbox, raw URL). Leave blank to use committed objectives."
         required: false
         type: string
       from_step:
@@ -22,6 +22,14 @@ on:
         default: "3"
         type: choice
         options: ["1", "2", "3"]
+      tm_project_id:
+        description: "TM Project ID (ULID). Leave blank to use repo variable TM_PROJECT_ID or default."
+        required: false
+        type: string
+      tm_environment_id:
+        description: "TM Environment ID (integer). Leave blank to use repo variable TM_ENVIRONMENT_ID or default."
+        required: false
+        type: string
 
 env:
   PYTHON_VERSION: "3.11"
@@ -73,7 +81,7 @@ jobs:
         run: |
           kane-cli login --username "$LT_USERNAME" --access-key "$LT_ACCESS_KEY"
           kane-cli install skill
-          kane-cli config project 01KVXJ82AKT83GWJNFZTQVMNRQ
+          kane-cli config project ${{ inputs.tm_project_id || vars.TM_PROJECT_ID || '01KVXJ82AKT83GWJNFZTQVMNRQ' }}
           kane-cli config folder  ${{ secrets.KANE_FOLDER_ID }}
           kane-cli whoami
 
@@ -199,8 +207,8 @@ jobs:
           ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_RUN_NUMBER:  ${{ github.run_number }}
           REQUIREMENTS_URL:   ${{ inputs.requirements_url }}
-          TM_PROJECT_ID:      ${{ vars.TM_PROJECT_ID }}
-          TM_ENVIRONMENT_ID:  ${{ vars.TM_ENVIRONMENT_ID }}
+          TM_PROJECT_ID:      ${{ inputs.tm_project_id || vars.TM_PROJECT_ID }}
+          TM_ENVIRONMENT_ID:  ${{ inputs.tm_environment_id || vars.TM_ENVIRONMENT_ID }}
         run: python3 -u ci/flow2_pipeline.py
 
       - name: Write GitHub Step Summary

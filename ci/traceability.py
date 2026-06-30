@@ -197,19 +197,16 @@ def write_markdown(matrix: dict) -> str:
     # ── Traceability table with bifurcation ───────────────────────────────────
     lines += [
         "## Requirement → Scenario → Test Case → Result\n",
-        "| AC | Acceptance Criterion | Scenario | TM Test Case | Authoring | Execution | RCA |",
-        "| -- | -------------------- | -------- | ------------ | :-------: | :-------: | --- |",
+        "| AC | Acceptance Criterion | Scenario | TM Test Case | Authoring | Execution |",
+        "| -- | -------------------- | -------- | ------------ | :-------: | :-------: |",
     ]
     for r in rows:
         tm_id   = r.get("tm_id", "")
         sc_name = r.get("sc_name", r["sc_id"])
         tc_cell = r.get("tc_link") or ("pending" if not tm_id else r["tc_internal"])
-        # Table cell: only show clean LT AI RCA (bullet points) — never failure_detail noise
-        rca_val = r.get("rca", "") if r.get("rca_source") != "claude-fallback" else ""
-        rca_snippet = (rca_val[:150] + "…") if len(rca_val) > 150 else (rca_val or "—")
         lines.append(
             f"| {r['ac_id']} | {r['criterion']} | {sc_name} | {tc_cell} "
-            f"| {r['authoring_icon']} | {r['he_icon']} | {rca_snippet} |"
+            f"| {r['authoring_icon']} | {r['he_icon']} |"
         )
 
     # ── Scenario Objectives ───────────────────────────────────────────────────

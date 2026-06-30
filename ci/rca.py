@@ -71,13 +71,14 @@ def _request(method: str, url: str, payload: dict = None) -> dict:
 
 # ── Step 1: Trigger RCA ───────────────────────────────────────────────────────
 
-def trigger_rca_for_job(job_id: str, log=None) -> int:
+def trigger_rca_for_job(job_id: str, log=None) -> dict:
     """
     POST /insights/api/v3/public/rca/generate with job_ids=[job_id].
-    Returns number of tests triggered. Zero if already generated or error.
+    Returns {"triggered": int, "skipped_already": int}.
+    skipped_already > 0 means RCA was already generated and is fetchable.
     """
     if not LT_ACCESS_KEY or not job_id:
-        return 0
+        return {"triggered": 0, "skipped_already": 0}
 
     msg = f"[rca] Triggering AI RCA for HE job {job_id}..."
     if log:
@@ -87,16 +88,53 @@ def trigger_rca_for_job(job_id: str, log=None) -> int:
 
     resp = _request("POST", RCA_TRIGGER_URL, {"job_ids": [job_id]})
     data = resp.get("data", {})
-    triggered = data.get("triggered_count", 0)
-    skipped   = data.get("skipped_count", 0)
+    triggered        = data.get("triggered_count", 0)
+    skipped_already  = data.get("skipped_already_generated", 0)
+    skipped_total    = data.get("skipped_count", 0)
 
-    msg = f"[rca] triggered={triggered}  skipped={skipped}"
+    msg = f"[rca] triggered={triggered}  skipped_already_generated={skipped_already}  skipped_total={skipped_total}"
     if log:
         log.info(msg)
     else:
         print(msg)
 
-    return triggered
+    return {"triggered": triggered, "skipped_already": skipped_already}
+
+
+RCA_FETCH_URL = "https://api.lambdatest.com/insights/api/v3/public/rca"
+
+
+def _fetch_rca_by_job(job_id: str, log=None) -> list:
+    """
+    POST /insights/api/v3/public/rca with job_ids=[job_id].
+    Returns list of RCA entries: [{test_id, rca_detail, ...}].
+    test_id matches the session_id from the sessions API.
+    """
+    resp = _request("POST", RCA_FETCH_URL, {"job_ids": [job_id]}) or {}
+    entries = resp.get("data", [])
+    if log:
+        log.info(f"[rca] Fetched {len(entries)} LT AI RCA entries for job {job_id}")
+    return entries if isinstance(entries, list) else []
+
+
+def _format_lt_rca(rca_detail: dict) -> str:
+    """Format LT AI RCA rca_detail into a clean multi-line summary."""
+    parts = []
+    summary = rca_detail.get("failure_summary", "")
+    if summary:
+        parts.append(f"**Failure:** {summary}")
+    analysis = rca_detail.get("analysis", [])
+    if analysis:
+        bullets = "\n".join(f"• {a}" for a in analysis)
+        parts.append(f"**Analysis:**\n{bullets}")
+    fixes = rca_detail.get("steps_to_fix", [])
+    if fixes:
+        fix_lines = "\n".join(
+            f"• {f.get('suggested_fix', '')}" for f in fixes if f.get("suggested_fix")
+        )
+        if fix_lines:
+            parts.append(f"**Fix:**\n{fix_lines}")
+    return "\n\n".join(parts)
 
 
 # ── Step 2: Fetch sessions for a build ───────────────────────────────────────
@@ -364,6 +402,12 @@ def _claude_rca_from_history(sc_ids: list, log=None) -> dict:
         objective = info.get("objective", "")
         if not detail:
             continue
+        # Skip HE execution failures — failure_detail is just a session link,
+        # not kane-cli authoring context. Claude would produce a generic
+        # "browser session failed" answer which is misleading. LT AI RCA
+        # (session-level) is the correct source for HE failures.
+        if detail.startswith("[HE execution failed"):
+            continue
 
         # Extract run_end narrative vs raw tail if embedded by run_kane()
         run_summary = ""
@@ -399,31 +443,41 @@ def _claude_rca_from_history(sc_ids: list, log=None) -> dict:
 def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None, tc_to_sc: dict = None) -> dict:
     """
     Full RCA pipeline for one HE job.
-    Returns {sc_id: rca_text} and saves ci/rca_results.json.
+    Returns {sc_id: {rca, session_link, session_id}} and saves ci/rca_results.json.
 
-    tc_to_sc: {"TC-41961": "SC-001", ...} — when provided, sessions are fetched by
-              TC internal IDs (TM-triggered HE doesn't share a common build name).
+    Flow:
+      1. Trigger LT AI RCA generation (or confirm already generated)
+      2. Fetch sessions to build session_id → sc_id mapping
+      3. Fetch LT AI RCA via POST /insights/api/v3/public/rca with job_ids
+         (test_id in RCA response == session_id from sessions API)
+      4. Format rca_detail directly — no Claude summarisation needed
+      5. Claude fallback ONLY for Phase 1 authoring failures with real failure_detail
+
+    tc_to_sc: {"TC-41961": "SC-001", ...} — match sessions by TC internal IDs.
     """
     if not LT_ACCESS_KEY or not job_id:
         if log:
             log.warning("[rca] Skipping — LT_ACCESS_KEY or job_id missing")
         return {}
 
-    # Start fresh each run — don't carry stale RCA from previous runs
-    triggered = trigger_rca_for_job(job_id, log)
+    _log = lambda m: (log.info(m) if log else print(m))
 
-    if triggered > 0:
-        msg = "[rca] Waiting 60s for LT AI RCA generation..."
-        print(msg) if not log else log.info(msg)
+    # Step 1: Trigger (or confirm already generated)
+    trigger_info     = trigger_rca_for_job(job_id, log)
+    newly_triggered  = trigger_info.get("triggered", 0)
+    already_done     = trigger_info.get("skipped_already", 0)
+    lt_rca_available = newly_triggered > 0 or already_done > 0
+
+    if newly_triggered > 0:
+        _log("[rca] Waiting 60s for LT AI RCA generation...")
         time.sleep(60)
 
-    # Fetch sessions — prefer TC-id mapping when available
+    # Step 2: Fetch sessions → build session_id → sc_id mapping
     if tc_to_sc:
         tc_internal_ids = set(tc_to_sc.keys())
         sessions = _fetch_sessions_by_tc_ids(tc_internal_ids)
         if not sessions:
-            msg = f"[rca] No sessions found by TC IDs {tc_internal_ids}"
-            print(msg) if not log else log.warning(msg)
+            _log(f"[rca] No sessions found by TC IDs {tc_internal_ids}")
         def _sc_id_for(s):
             return tc_to_sc.get(s.get("_tc_id", ""), "")
     else:
@@ -432,99 +486,74 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None, tc_to_sc:
             sessions = fetch_sessions_for_build(build_name, log)
             if sessions:
                 break
-            msg = f"[rca] No sessions found for build '{build_name}' (attempt {attempt}/3) — waiting 15s..."
-            print(msg) if not log else log.warning(msg)
+            _log(f"[rca] No sessions for build '{build_name}' (attempt {attempt}/3) — waiting 15s...")
             time.sleep(15)
         def _sc_id_for(s):
             return _session_to_sc_id(s["name"])
 
+    # session_id → (sc_id, session_dict) for RCA mapping
+    sid_to_sc: dict = {}
+    for s in sessions:
+        sc_id = _sc_id_for(s)
+        if sc_id and s.get("session_id"):
+            sid_to_sc[s["session_id"]] = (sc_id, s)
+
     results = {}
 
-    # If LT AI RCA trigger returned 0 (Flow 2 KaneAI TM sessions not indexed by job),
-    # LT AI RCA is still generated at the session level — poll each failed session
-    # before falling back to Claude (which produces generic "browser session" errors).
-    if triggered == 0:
-        msg = "[rca] triggered=0 — polling session-level LT AI RCA before Claude fallback..."
-        print(msg) if not log else log.info(msg)
-        _rca_found = False
-        for s in sessions:
-            if s["status"] not in ("failed", "error"):
+    # Step 3+4: Fetch LT AI RCA via the correct endpoint
+    # test_id in the RCA response == session_id from the sessions API
+    if lt_rca_available:
+        rca_entries = _fetch_rca_by_job(job_id, log)
+        for entry in rca_entries:
+            test_id    = entry.get("test_id", "")
+            rca_detail = entry.get("rca_detail", {})
+            if not rca_detail:
                 continue
-            sc_id = _sc_id_for(s)
-            if not sc_id or not s.get("session_id"):
+            sc_id, sess = sid_to_sc.get(test_id, (None, {}))
+            if not sc_id:
+                _log(f"[rca] test_id {test_id} not mapped to any SC — skipping")
                 continue
-            # Use _poll_session_rca (retries up to 120s) — gives LT AI time to generate
-            raw = _poll_session_rca(s["session_id"], sc_id, timeout=120, interval=15, log=log)
-            if raw:
-                rca_text = _summarize(raw, sc_id)
-                results[sc_id] = {
-                    "rca":          rca_text,
-                    "raw":          raw[:500],
-                    "session_link": s["session_link"],
-                    "session_id":   s["session_id"],
-                }
-                _rca_found = True
-                msg = f"[rca] {sc_id} LT AI session RCA → {rca_text[:80]}..."
-                print(msg) if not log else log.info(msg)
-        if _rca_found:
+            if sc_id in results:   # keep first entry per SC
+                continue
+            rca_text = _format_lt_rca(rca_detail)
+            results[sc_id] = {
+                "rca":          rca_text,
+                "raw":          json.dumps(rca_detail)[:500],
+                "session_link": sess.get("session_link", ""),
+                "session_id":   test_id,
+            }
+            _log(f"[rca] {sc_id} LT AI RCA → {rca_text[:80]}...")
+
+        if results:
             RCA_FILE.write_text(json.dumps(results, indent=2))
-            msg = f"[rca] Saved {len(results)} LT AI session RCA entries (triggered=0 path)"
-            print(msg) if not log else log.info(msg)
+            _log(f"[rca] Saved {len(results)} LT AI RCA entries to {RCA_FILE.name}")
             return results
 
-    if triggered == 0:
-        msg = "[rca] triggered=0 — LT AI RCA unavailable; generating Claude RCA from failure details"
-        print(msg) if not log else log.info(msg)
-        _best: dict = {}
-        for s in sessions:
-            sc_id = _sc_id_for(s)
-            if not sc_id:
+        _log("[rca] LT AI RCA triggered but no entries returned — falling back to Claude for authoring failures")
+
+    # Step 5: Claude fallback — ONLY for Phase 1 authoring failures
+    # Never for HE execution failures (failure_detail = session link → misleading output)
+    _log("[rca] Generating Claude RCA for Phase 1 authoring failures...")
+    failed_sc_ids = []
+    if HISTORY_FILE.exists():
+        hist = json.loads(HISTORY_FILE.read_text())
+        for sc_id, info in hist.items():
+            if info.get("status") == "passed":
                 continue
-            st = "passed" if s["status"] == "passed" else "failed"
-            if sc_id not in _best or (_best[sc_id]["_st"] != "passed" and st == "passed"):
-                _best[sc_id] = {**s, "_st": st}
-        failed_sc_ids = [sid for sid, sv in _best.items() if sv["_st"] in ("failed", "error")]
-        # Also include any SC IDs from run_history that HE marked as failed
-        if HISTORY_FILE.exists():
-            hist = json.loads(HISTORY_FILE.read_text())
-            for sc_id, info in hist.items():
-                if info.get("status") != "passed" and sc_id not in failed_sc_ids:
-                    failed_sc_ids.append(sc_id)
+            detail = info.get("failure_detail", "")
+            if detail and not detail.startswith("[HE execution failed"):
+                failed_sc_ids.append(sc_id)
+
+    if failed_sc_ids:
         claude_rcas = _claude_rca_from_history(failed_sc_ids, log)
         for sc_id, rca_text in claude_rcas.items():
             results[sc_id] = {
                 "rca":          rca_text,
                 "raw":          "",
-                "session_link": next((s["session_link"] for s in sessions
-                                      if _sc_id_for(s) == sc_id), ""),
+                "session_link": next((s["session_link"] for s in sessions if _sc_id_for(s) == sc_id), ""),
                 "session_id":   "",
                 "source":       "claude-fallback",
             }
-        RCA_FILE.write_text(json.dumps(results, indent=2))
-        msg = f"[rca] Saved {len(results)} Claude RCA entries to {RCA_FILE.name}"
-        print(msg) if not log else log.info(msg)
-        return results
-
-    for s in sessions:
-        if s["status"] not in ("failed", "error"):
-            continue
-        sc_id = _sc_id_for(s)
-        if not sc_id:
-            continue
-
-        raw = _poll_session_rca(s["session_id"], sc_id, timeout=120, interval=10, log=log)
-        if not raw:
-            continue
-
-        rca_text = _summarize(raw, sc_id)
-        results[sc_id] = {
-            "rca":          rca_text,
-            "raw":          raw[:500],
-            "session_link": s["session_link"],
-            "session_id":   s["session_id"],
-        }
-        msg = f"[rca] {sc_id} RCA → {rca_text[:80]}..."
-        print(msg) if not log else log.info(msg)
 
     RCA_FILE.write_text(json.dumps(results, indent=2))
     msg = f"[rca] Saved {len(results)} RCA entries to {RCA_FILE.name}"
