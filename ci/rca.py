@@ -144,7 +144,7 @@ def _fetch_sessions_by_tc_ids(tc_internal_ids: set) -> list:
     """
     if not tc_internal_ids or not LT_ACCESS_KEY:
         return []
-    resp = _request("GET", f"{SESSIONS_URL}?limit=50") or {}
+    resp = _request("GET", f"{SESSIONS_URL}?limit=100") or {}
     raw = resp.get("data", {})
     sessions_raw = raw.get("sessions", raw) if isinstance(raw, dict) else raw
     if not isinstance(sessions_raw, list):
@@ -413,9 +413,9 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None, tc_to_sc:
     triggered = trigger_rca_for_job(job_id, log)
 
     if triggered > 0:
-        msg = "[rca] Waiting 10s for AI RCA generation to start..."
+        msg = "[rca] Waiting 60s for LT AI RCA generation..."
         print(msg) if not log else log.info(msg)
-        time.sleep(10)
+        time.sleep(60)
 
     # Fetch sessions — prefer TC-id mapping when available
     if tc_to_sc:
@@ -441,7 +441,37 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None, tc_to_sc:
     results = {}
 
     # If LT AI RCA trigger returned 0 (Flow 2 KaneAI TM sessions not indexed),
-    # fall back to Claude-generated RCA from kane-cli failure_detail in run_history
+    # wait briefly and try session-level RCA before falling back to Claude.
+    if triggered == 0:
+        msg = "[rca] triggered=0 — waiting 30s then checking session-level RCA before Claude fallback..."
+        print(msg) if not log else log.info(msg)
+        time.sleep(30)
+        # Attempt per-session RCA for failed sessions
+        _rca_found = False
+        for s in sessions:
+            if s["status"] not in ("failed", "error"):
+                continue
+            sc_id = _sc_id_for(s)
+            if not sc_id or not s.get("session_id"):
+                continue
+            raw = _fetch_session_rca(s["session_id"])
+            if raw:
+                rca_text = _summarize(raw, sc_id)
+                results[sc_id] = {
+                    "rca":          rca_text,
+                    "raw":          raw[:500],
+                    "session_link": s["session_link"],
+                    "session_id":   s["session_id"],
+                }
+                _rca_found = True
+                msg = f"[rca] {sc_id} session RCA found → {rca_text[:80]}..."
+                print(msg) if not log else log.info(msg)
+        if _rca_found:
+            RCA_FILE.write_text(json.dumps(results, indent=2))
+            msg = f"[rca] Saved {len(results)} session RCA entries (triggered=0 path)"
+            print(msg) if not log else log.info(msg)
+            return results
+
     if triggered == 0:
         msg = "[rca] triggered=0 — LT AI RCA unavailable; generating Claude RCA from failure details"
         print(msg) if not log else log.info(msg)

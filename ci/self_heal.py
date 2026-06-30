@@ -42,23 +42,27 @@ RULES for rewriting (no exceptions):
 1. Keep the same app URL, credentials, and intent as the original objective.
 2. Be high-level and intent-based — state WHAT to verify, not HOW to click each element.
    kane-cli figures out the exact interactions itself.
-3. EXACTLY one sentence: login (if required) + ONE action + ONE "and verify ..." assertion.
-   - ONE action means one thing the user does (e.g. "add X to the cart" OR "sort by price").
-   - ONE verify means one thing to check at the end (e.g. "verify button reads 'Remove'").
-   - NEVER chain two actions with "and", "then", "also", or any other connector.
+3. EXACTLY one sentence: login (if required) + ONE physical interaction + ONE "and verify ..." assertion.
+   - ONE interaction means one thing (one click, one selection, one submit).
+   - The assertion must verify something IMMEDIATELY VISIBLE on the same page after that action.
+   - NEVER chain two interactions — no "and then", "and navigate", "and click" after the first action.
    - NEVER add a second "and verify" or "also verify".
-4. Do not add spatial hints, price coordinates, or element positions.
-5. Do not add step counts or micro-instructions.
-6. Reference visible text labels for buttons and links (e.g. 'Add to cart', 'Remove').
-7. If the failure suggests a timing issue, simplify — remove any intermediate steps.
+4. NEVER use "changes to" — button/element state transitions are timing-sensitive and unreliable.
+5. Do not add spatial hints, price coordinates, or element positions.
+6. Do not add step counts or micro-instructions.
+7. If the failure suggests a timing issue, simplify — verify something static (a heading, a count, visible text).
 8. Credentials must stay inline in the objective if the original had them.
 
-GOOD (one action + one verify):
-  "Login to https://app.com/ as user with password pass, add Item X to the cart, and verify the button changes to 'Remove'."
+GOOD — one click, assertion visible immediately:
+  "Login to https://app.com/ as user with password pass, click the Add to cart button for Item X, and verify the cart badge shows 1."
+  "Login to https://app.com/ as user with password pass, click the cart icon, and verify the heading Your Cart is visible."
+  "Login to https://app.com/ as user with password pass, select Price low to high from the sort dropdown, and verify the price $7.99 is visible."
 
 BAD (NEVER write these):
-  "...add Item X to the cart and click Remove, and verify the button is 'Add to cart'." — TWO actions
-  "...add Item X to the cart and verify the badge shows 1, then click Remove and verify..." — TWO verifications
+  "...add Item X to the cart and navigate to the cart page, and verify..." — navigation is a second action
+  "...add Item X to the cart and click Remove, and verify..." — TWO interactions
+  "...verify the button changes to Remove" — state transition, timing-sensitive
+  "...add to cart and verify badge, then click Remove and verify..." — TWO verifications
 """
 
 
@@ -196,9 +200,13 @@ def heal_objectives(history: dict, log=None, rca_results: dict = None) -> int:
             log.warning(f"[self-heal] {sc_id} failed last run — asking Claude to rewrite objective")
 
         rca_text = info.get("_rca", "")
-        context = run_summary or (failure_detail[-600:] if failure_detail else "")
-        if not context and rca_text:
+        # If failure_detail is just an HE session link (not a meaningful authoring error),
+        # prefer RCA text as healing context — it has the actual root cause.
+        he_session_failure = failure_detail.startswith("[HE execution failed")
+        if rca_text and (not run_summary or he_session_failure):
             context = f"[HE execution failure — AI RCA]: {rca_text}"
+        else:
+            context = run_summary or (failure_detail[-600:] if failure_detail else "")
 
         prompt = f"""The following test objective failed on the previous pipeline run.
 

@@ -29,15 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install Python dependencies
-        run: pip install anthropic -q
-
       - name: Ensure reports directory
-        run: mkdir -p reports
+        run: mkdir -p reports ci
 
       - name: Download Flow 2 results (latest successful run or specified run_id)
         env:
@@ -63,20 +56,15 @@ jobs:
               -exec cp {} ci/tm_test_cases.json \; 2>/dev/null || true
           fi
 
-      - name: Show traceability matrix
-        run: python3 ci/demo.py
-
       - name: Write GitHub Step Summary
         if: always()
         run: |
           {
-            echo "## Flow 2 — Live Traceability Matrix"
-            echo ""
-            echo "\`\`\`"
-            python3 ci/demo.py 2>/dev/null || echo "No cached results found. Run Flow 2 first."
-            echo "\`\`\`"
+            echo "## Agentic SDLC — Results"
             echo ""
             if [ -f reports/traceability_matrix.md ]; then
               cat reports/traceability_matrix.md
+            else
+              echo "_No traceability matrix found. Run Flow 2 first._"
             fi
           } >> $GITHUB_STEP_SUMMARY

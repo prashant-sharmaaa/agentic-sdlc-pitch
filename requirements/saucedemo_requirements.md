@@ -1,3 +1,4 @@
+
 # Swag Labs (saucedemo.com) — E-Commerce Test Requirements
 
 Base URL: https://www.saucedemo.com/

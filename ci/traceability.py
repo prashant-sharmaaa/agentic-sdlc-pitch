@@ -116,6 +116,7 @@ def build_matrix() -> dict:
             "he_icon":          _icon(exec_st),
             "failure_detail":   failure_detail,
             "rca":              rca_text,
+            "rca_source":       rca_entry.get("source", ""),
             "session_link":     session_link,
             "last_run_ts":      last_run_ts,
             "flow":             flow,
@@ -173,19 +174,24 @@ def write_markdown(matrix: dict) -> str:
             jid        = info.get("job_id", "")
             ts2        = info.get("ts", "")
             report_url = info.get("tm_report_url", "")
-            he_line = f"**HyperExecute Job:** [{jid}]({link}) — {ts2}"
+            he_text    = f"[{jid}]({link})" if link else (jid or "—")
+            he_line    = f"**HyperExecute Job:** {he_text} — {ts2}"
             if report_url:
                 he_line += f" &nbsp;|&nbsp; [📋 TM Test Run Report]({report_url})"
+            elif link:
+                he_line += f" &nbsp;|&nbsp; [🔗 HE Dashboard]({link})"
             lines.append(he_line)
         lines.append("")
 
     # ── Summary ───────────────────────────────────────────────────────────────
+    last_ts = max((r["last_run_ts"] for r in rows if r.get("last_run_ts")), default="")
+    last_ts_note = f"\n_Last run: {last_ts[:19].replace('T', ' ')}_\n" if last_ts else "\n"
     lines += [
         "## Summary\n",
         f"| Total ACs | ✅ Passed | ❌ Failed | Pass Rate |",
         f"| --------- | --------- | --------- | --------- |",
         f"| {summary['total']} | {summary['passed']} | {summary['failed']} | {summary['pass_rate']}% |",
-        "",
+        last_ts_note,
     ]
 
     # ── Traceability table with bifurcation ───────────────────────────────────
@@ -198,8 +204,9 @@ def write_markdown(matrix: dict) -> str:
         tm_id   = r.get("tm_id", "")
         sc_name = r.get("sc_name", r["sc_id"])
         tc_cell = r.get("tc_link") or ("pending" if not tm_id else r["tc_internal"])
-        rca_val = r.get("rca") or (_clean_failure_detail(r.get("failure_detail", ""), 300) if r["status"] == "failed" else "")
-        rca_snippet = (rca_val[:200] + "…") if len(rca_val) > 200 else (rca_val or "—")
+        # Table cell: only show clean LT AI RCA (bullet points) — never failure_detail noise
+        rca_val = r.get("rca", "") if r.get("rca_source") != "claude-fallback" else ""
+        rca_snippet = (rca_val[:150] + "…") if len(rca_val) > 150 else (rca_val or "—")
         lines.append(
             f"| {r['ac_id']} | {r['criterion']} | {sc_name} | {tc_cell} "
             f"| {r['authoring_icon']} | {r['he_icon']} | {rca_snippet} |"

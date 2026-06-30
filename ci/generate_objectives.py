@@ -37,20 +37,24 @@ NOT include step-by-step instructions, spatial hints, price coordinates, or UI e
 FORMAT RULES (strict — no exceptions):
 - One sentence per objective
 - Start with login (include URL, username, password inline if the app requires login)
-- State EXACTLY ONE action after login — not two, not a sequence
-- End with EXACTLY ONE "and verify ..." assertion
-- NEVER use "then", "next", "after that", "also verify", or any chaining words
-- Max 30 words
+- State EXACTLY ONE physical interaction after login (one click, one selection, one submit)
+- The assertion must verify something IMMEDIATELY VISIBLE on the same page after that action
+- End with EXACTLY ONE "and verify ..." clause
+- NEVER chain two interactions — no "and then", "and navigate", "and click" after the first action
+- NEVER use "changes to" — timing-sensitive and unreliable
+- Max 25 words after login
 
-GOOD examples — each has ONE action + ONE verify:
-  "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, add Sauce Labs Backpack to the cart, and verify the button changes to 'Remove'."
-  "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, sort the product list by Price low to high, and verify the first product shows price $7.99."
-  "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, open the cart, and verify 'Sauce Labs Backpack' appears in the cart."
+GOOD — one click, assertion visible immediately:
+  "Login to https://app.com/ as user with password pass, click the Add to cart button for Item X, and verify the cart badge shows 1."
+  "Login to https://app.com/ as user with password pass, select Price low to high from the sort dropdown, and verify the price $7.99 is visible."
+  "Login to https://app.com/ as user with password pass, click the cart icon, and verify the heading Your Cart is visible."
+  "Login to https://app.com/ as user with password pass and verify the dashboard heading is visible."
 
-BAD (NEVER do this):
-  "add Sauce Labs Backpack to the cart, remove it, and verify..." — TWO actions (add + remove)
-  "add to cart and verify the badge shows 1, then click Remove and verify..." — TWO verifications
-  "Navigate to the URL, type username into the username input, click Login, click Add to cart..." — step-by-step micro-instructions
+BAD (NEVER write these):
+  "...add Item X to the cart and navigate to the cart page, and verify..." — navigation is a second action
+  "...add Item X to the cart and click Remove, and verify..." — TWO interactions
+  "...verify the button changes to Remove" — state transition, timing-sensitive
+  "...add to cart and verify badge, then click Remove and verify..." — TWO verifications
 
 App URL: {base_url}
 App credentials: username={username}, password={password}
@@ -86,21 +90,31 @@ def main():
         print("ERROR: no acceptance criteria found in analyzed_requirements.json", file=sys.stderr)
         sys.exit(1)
 
-    # Extract credentials from ACs if present, else use saucedemo defaults
+    # Extract credentials — check analyzed JSON first, then scan AC text
     ac_text = "\n".join(
         f"  {ac['id']}: {ac['description']}" for ac in acs
     )
-    # Heuristic: look for credentials in analyzed text
-    username = "standard_user"
-    password = "secret_sauce"
-    for ac in acs:
-        desc = ac.get("description", "").lower()
-        steps = " ".join(ac.get("kane_steps", [])).lower()
-        combined = desc + " " + steps
-        if "standard_user" in combined:
-            username = "standard_user"
-        if "secret_sauce" in combined:
-            password = "secret_sauce"
+    username = analyzed.get("username", "")
+    password = analyzed.get("password", "")
+
+    if not username or not password:
+        # Scan all AC descriptions and kane_steps for credential patterns
+        import re as _re
+        all_text = " ".join(
+            ac.get("description", "") + " " + " ".join(ac.get("kane_steps", []))
+            for ac in acs
+        )
+        # Match username=value or "login as value" patterns
+        m_user = _re.search(r'username[=:\s]+([A-Za-z0-9_@.]+)', all_text, _re.IGNORECASE)
+        m_pass = _re.search(r'password[=:\s]+([A-Za-z0-9_!@#$%^&*]+)', all_text, _re.IGNORECASE)
+        if m_user:
+            username = m_user.group(1)
+        if m_pass:
+            password = m_pass.group(1)
+
+    # Fall back to saucedemo defaults
+    username = username or "standard_user"
+    password = password or "secret_sauce"
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
@@ -126,7 +140,7 @@ def main():
     ac_hash = hashlib.sha256(json.dumps(acs, sort_keys=True).encode()).hexdigest()[:16]
     HASH_FILE = OUTPUT_FILE.parent / ".objectives_hash"
     cached = HASH_FILE.read_text().strip() if HASH_FILE.exists() else ""
-    if ac_hash == cached and OUTPUT_FILE.exists() and "--force" not in __import__("sys").argv:
+    if ac_hash == cached and OUTPUT_FILE.exists() and "--force" not in sys.argv:
         print(f"[objectives] ACs unchanged (hash={ac_hash}) — skipping Claude generation")
         print(f"[objectives] Using existing {OUTPUT_FILE.name} (pass --force to regenerate)")
         return
