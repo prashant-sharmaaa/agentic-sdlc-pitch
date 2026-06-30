@@ -94,11 +94,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Separate artifact namespaces: default runs never restore from custom URL runs and vice versa.
-          # This keeps objectives, history, and healing completely isolated between the two flows.
+          # Custom URL runs are further isolated per URL (8-char SHA256 hash) so URL-A history
+          # never pollutes URL-B healing — each URL gets its own objectives/history/healing chain.
           if [ -n "${{ inputs.requirements_url }}" ]; then
-            ARTIFACT_PATTERN="flow2-results-custom-*"
-            echo "Custom URL run — restoring from custom artifacts only"
+            URL_HASH=$(echo "${{ inputs.requirements_url }}" | sha256sum | cut -c1-8)
+            echo "URL_HASH=${URL_HASH}" >> $GITHUB_ENV
+            ARTIFACT_PATTERN="flow2-results-custom-${URL_HASH}-*"
+            echo "Custom URL run (hash=${URL_HASH}) — restoring from custom artifacts only"
           else
+            URL_HASH=""
+            echo "URL_HASH=" >> $GITHUB_ENV
             ARTIFACT_PATTERN="flow2-results-default-*"
             echo "Default run — restoring from default artifacts only"
           fi
@@ -115,6 +120,13 @@ jobs:
             [ -n "$RHASH" ] && cp "$RHASH" requirements/.requirements_hash && echo "Restored .requirements_hash"
             OHASH=$(find /tmp/prev-artifacts -name ".objectives_hash" | head -1)
             [ -n "$OHASH" ] && cp "$OHASH" ci/.objectives_hash && echo "Restored .objectives_hash"
+            # Custom URL runs only: restore healed objectives so cross-run heal and
+            # hash-skip work across runs for the same URL. Default runs get objectives
+            # from the repo (kept fresh by auto-improve commits) — never restored here.
+            if [ -n "${{ inputs.requirements_url }}" ]; then
+              OBJS=$(find /tmp/prev-artifacts -name "objectives.json" | head -1)
+              [ -n "$OBJS" ] && cp "$OBJS" ci/objectives.json && echo "Restored objectives.json (custom URL run — healed objectives preserved)"
+            fi
             if [ -z "$HIST" ]; then echo "No previous artifact found — starting fresh"; fi
           else
             echo "No previous successful flow2 run found — starting fresh"
@@ -236,7 +248,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ inputs.requirements_url != '' && format('flow2-results-custom-{0}', github.run_number) || format('flow2-results-default-{0}', github.run_number) }}
+          name: ${{ inputs.requirements_url != '' && format('flow2-results-custom-{0}-{1}', env.URL_HASH, github.run_number) || format('flow2-results-default-{0}', github.run_number) }}
           path: |
             reports/
             ci/objectives.json
