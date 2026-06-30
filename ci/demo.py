@@ -50,7 +50,10 @@ def print_matrix(cache: dict):
     for r in rows:
         sc_name = r.get("sc_name", r["sc_id"])[:44]
         tc = r.get("tc_internal", "pending")
-        print(f"{r['ac_id']:<8} {sc_name:<46} {tc:<12} {r['overall']} {r['status']}")
+        auth_icon = r.get("authoring_icon", "—")
+        he_icon   = r.get("he_icon", r.get("overall", "—"))
+        he_status = r.get("he_status") or r.get("status", "")
+        print(f"{r['ac_id']:<8} {sc_name:<46} {tc:<12} Auth:{auth_icon} Exec:{he_icon} {he_status}")
 
     # Summary bar
     s = summary
@@ -70,7 +73,7 @@ def print_matrix(cache: dict):
         print()
 
     # Failed detail + RCA
-    failed = [r for r in rows if r["status"] == "failed"]
+    failed = [r for r in rows if r.get("he_status", r.get("status", "")) == "failed"]
     if failed:
         print("  Failed scenarios — AI Root Cause Analysis:")
         for r in failed:

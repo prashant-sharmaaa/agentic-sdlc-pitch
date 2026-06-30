@@ -706,13 +706,21 @@ if __name__ == "__main__":
     rca_data = json.loads(Path(__file__).parent.joinpath("rca_results.json").read_text()) \
                if Path(__file__).parent.joinpath("rca_results.json").exists() else {}
     healed_count = heal_objectives(final_history, log, rca_results=rca_data)
+    # Skip auto-commit when running with a custom requirements URL — the objectives
+    # generated from that URL are one-off and must NOT overwrite the default saucedemo repo.
+    custom_url_run = bool(os.environ.get("REQUIREMENTS_URL", "").strip())
+    if custom_url_run and healed_count:
+        log.info("[auto-improve] Custom URL run — skipping auto-commit to keep repo on default (saucedemo) objectives")
+        healed_count = 0
     if healed_count:
         log.info(f"[auto-improve] {healed_count} objective(s) improved — committing objectives.json")
         import subprocess as _sp
         run_number = os.environ.get("GITHUB_RUN_NUMBER", "?")
         _sp.run(["git", "config", "user.email", "actions@github.com"], check=False)
         _sp.run(["git", "config", "user.name", "GitHub Actions"], check=False)
+        # Stage objectives + analyzed_requirements together so they always stay in sync
         _sp.run(["git", "add", "ci/objectives.json"], check=False)
+        _sp.run(["git", "add", "requirements/analyzed_requirements.json"], check=False)
         result = _sp.run(
             ["git", "commit", "-m",
              f"chore(objectives): auto-improve {healed_count} SC(s) from run #{run_number} [skip ci]"],

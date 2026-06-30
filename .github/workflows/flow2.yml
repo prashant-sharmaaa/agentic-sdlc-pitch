@@ -194,10 +194,11 @@ jobs:
 
       - name: "Step 3 — Flow 2 pipeline (KaneAI → TM API → HyperExecute)"
         env:
-          LT_USERNAME:       ${{ secrets.LT_USERNAME }}
-          LT_ACCESS_KEY:     ${{ secrets.LT_ACCESS_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          LT_USERNAME:        ${{ secrets.LT_USERNAME }}
+          LT_ACCESS_KEY:      ${{ secrets.LT_ACCESS_KEY }}
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_RUN_NUMBER:  ${{ github.run_number }}
+          REQUIREMENTS_URL:   ${{ inputs.requirements_url }}
         run: python3 -u ci/flow2_pipeline.py
 
       - name: Write GitHub Step Summary

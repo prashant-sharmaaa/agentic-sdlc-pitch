@@ -2,35 +2,31 @@
   {
     "id": "SC-001",
     "ac_id": "AC-001",
-    "name": "SC-001: Valid Login Redirects to Booking Page",
-    "objective": "Login to https://katalon-demo-cura.herokuapp.com/ as John Doe with password ThisIsNotAPassword and verify the appointment booking page is displayed."
+    "name": "SC-001: Add to cart changes button to Remove",
+    "objective": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, add Sauce Labs Backpack to the cart, and verify the button label changes to 'Remove'."
   },
   {
     "id": "SC-002",
     "ac_id": "AC-002",
-    "name": "SC-002: Invalid Login Denied",
-    "objective": "Login to https://katalon-demo-cura.herokuapp.com/ as invalid_user with password wrong_password and verify an error message is displayed indicating the login failed.",
-    "healed_from": "Login to https://katalon-demo-cura.herokuapp.com/ as invalid_user with password wrong_password and verify access to the portal is denied with an error message."
+    "name": "SC-002: Cart page shows item name and price",
+    "objective": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, add Sauce Labs Backpack to the cart, navigate to the cart page, and verify 'Sauce Labs Backpack' is listed."
   },
   {
     "id": "SC-003",
-    "ac_id": "AC-009",
-    "name": "SC-003: Book Appointment Shows Confirmation",
-    "objective": "Login to https://katalon-demo-cura.herokuapp.com/ as John Doe with password ThisIsNotAPassword, submit the appointment booking form with any valid inputs, and verify the heading 'Appointment Confirmation' is displayed.",
-    "healed_from": "Login to https://katalon-demo-cura.herokuapp.com/ as John Doe with password ThisIsNotAPassword, complete and submit the appointment booking form, and verify the heading 'Appointment Confirmation' is displayed."
+    "ac_id": "AC-003",
+    "name": "SC-003: Remove item restores Add to cart button",
+    "objective": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, add Sauce Labs Backpack to the cart and click Remove, and verify the button label is 'Add to cart'."
   },
   {
     "id": "SC-004",
-    "ac_id": "AC-010",
-    "name": "SC-004: Facility Reflected on Confirmation",
-    "objective": "Login to https://katalon-demo-cura.herokuapp.com/ as John Doe with password ThisIsNotAPassword, book an appointment with facility 'Hongkong CURA Healthcare Center' by filling in all required fields and submitting the form, and verify the confirmation page displays 'Hongkong CURA Healthcare Center'.",
-    "healed_from": "Login to https://katalon-demo-cura.herokuapp.com/ as John Doe with password ThisIsNotAPassword, book an appointment selecting 'Hongkong CURA Healthcare Center' as the facility, and verify the confirmation page displays 'Hongkong CURA Healthcare Center'."
+    "ac_id": "AC-004",
+    "name": "SC-004: Sort by price shows cheapest product first",
+    "objective": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, select the Price (low to high) sort option, and verify a product with price $7.99 is visible on the page."
   },
   {
     "id": "SC-005",
-    "ac_id": "AC-011",
-    "name": "SC-005: Navigate to Appointment History",
-    "objective": "Login to https://katalon-demo-cura.herokuapp.com/ as John Doe with password ThisIsNotAPassword, book an appointment by filling in the appointment form and submitting it, and verify the appointment appears on the history page with a facility name and visit date.",
-    "healed_from": "Login to https://katalon-demo-cura.herokuapp.com/ as John Doe with password ThisIsNotAPassword, navigate to the appointment history page from the main menu, and verify previously booked appointments are listed with facility name and visit date."
+    "ac_id": "AC-005",
+    "name": "SC-005: Catalog page loads with product listings",
+    "objective": "Login to https://www.saucedemo.com/ using username standard_user and password secret_sauce, then verify the text Sauce Labs Backpack appears on the page."
   }
 ]

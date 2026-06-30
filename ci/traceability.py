@@ -98,6 +98,7 @@ def build_matrix() -> dict:
         session_link = rca_entry.get("session_link", "")
 
         def _icon(s): return "✅" if s == "passed" else ("❌" if s == "failed" else "—")
+        exec_st = he_status or status
         rows.append({
             "ac_id":            ac_id,
             "criterion":        req["description"],
@@ -110,8 +111,9 @@ def build_matrix() -> dict:
             "status":           status,
             "authoring_status": authoring_status,
             "he_status":        he_status or status,
+            "overall":          _icon(exec_st),   # kept for demo.py backwards compat
             "authoring_icon":   _icon(authoring_status),
-            "he_icon":          _icon(he_status or status),
+            "he_icon":          _icon(exec_st),
             "failure_detail":   failure_detail,
             "rca":              rca_text,
             "session_link":     session_link,
