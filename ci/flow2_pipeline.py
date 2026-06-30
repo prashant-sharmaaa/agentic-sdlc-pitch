@@ -484,23 +484,27 @@ def phase2_fetch_test_cases(kane_results):
 
 # ── Phase 3: Create test run + trigger HyperExecute ──────────────────────────
 
-def poll_he_job(job_id: str, build_name: str, timeout: int = 1800, log=None) -> str:
+def poll_he_job(job_id: str, tc_internal_ids: set, timeout: int = 1800, log=None) -> str:
     """
-    Poll automation sessions API until all sessions for the build reach a final
+    Poll automation sessions API until all sessions for this HE job reach a final
     status (passed/failed/cancelled/error) or timeout is reached.
     Returns 'completed' or 'timeout'.
-    Final statuses are checked every 30s after an initial 60s warm-up.
+
+    TM-triggered HE sessions are named "Web || gagandeepb || TC-41961" and each
+    test case gets its own build UUID — there is no shared build name across the job.
+    We match sessions by tc_internal_ids ({"TC-41961", "TC-41962", ...}).
     """
-    from rca import fetch_sessions_for_build
+    from rca import _fetch_sessions_by_tc_ids
     _log = lambda m: (log.info(m) if log else print(m))
     FINAL = {"passed", "failed", "cancelled", "error", "skipped", "stopped"}
 
     _log(f"[he-poll] Waiting for HE job {job_id} to complete (timeout={timeout}s)...")
+    _log(f"[he-poll] Tracking TC IDs: {tc_internal_ids}")
     time.sleep(60)  # warm-up — HE takes time to start sessions
 
     elapsed = 60
     while elapsed < timeout:
-        sessions = fetch_sessions_for_build(build_name, log=None)
+        sessions = _fetch_sessions_by_tc_ids(tc_internal_ids)
         if sessions:
             statuses = {s["status"] for s in sessions}
             pending  = statuses - FINAL
@@ -665,18 +669,32 @@ if __name__ == "__main__":
 
     job_id, job_link, tm_report_url = phase3_trigger_he(test_cases)
 
+    # Build TC internal ID → SC-id mapping for session tracking
+    # TM-triggered HE sessions are named "Web || gagandeepb || TC-41961" —
+    # there is no shared build name, so we match sessions by TC internal IDs.
+    ulid_to_sc = {r["testcase_id"]: r["sc_id"] for r in kane_results if r.get("testcase_id")}
+    tc_to_sc: dict = {}       # {"TC-41961": "SC-001", ...}
+    tc_internal_ids: set = set()
+    for tc in test_cases:
+        internal = tc.get("internal_id", "")
+        ulid     = tc.get("test_case_id", "")
+        if internal and ulid in ulid_to_sc:
+            tc_to_sc[internal] = ulid_to_sc[ulid]
+            tc_internal_ids.add(internal)
+    log.info(f"[poll] TC→SC mapping: {tc_to_sc}")
+
     # Persist HE job
     if job_id:
         record_he_job("flow2", job_id, job_link, tm_report_url=tm_report_url)
 
         # Wait for HE job to finish before fetching results / running RCA
-        poll_he_job(job_id, SESSION_BUILD_NAME, timeout=1800, log=log)
+        poll_he_job(job_id, tc_internal_ids, timeout=1800, log=log)
 
         # Override run_history with actual HE pass/fail (not kane-cli Phase 1 status)
-        update_history_from_he(SESSION_BUILD_NAME, flow="flow2", log=log)
+        update_history_from_he(SESSION_BUILD_NAME, flow="flow2", log=log, tc_to_sc=tc_to_sc)
 
         # RCA only for failed test sessions (skips automatically if triggered=0)
-        run_rca(job_id, build_name=SESSION_BUILD_NAME, log=log)
+        run_rca(job_id, build_name=SESSION_BUILD_NAME, log=log, tc_to_sc=tc_to_sc)
 
     # Build traceability matrix after HE results are in
     run_traceability(log)

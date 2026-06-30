@@ -135,6 +135,35 @@ def fetch_sessions_for_build(build_name: str, log=None) -> list:
     return result
 
 
+def _fetch_sessions_by_tc_ids(tc_internal_ids: set) -> list:
+    """
+    Fetch recent sessions (no build filter) and match by TM internal TC IDs.
+    e.g. tc_internal_ids = {"TC-41961", "TC-41962"} matches "Web || gagandeepb || TC-41961".
+    Used when TM-triggered HE sessions don't share a common build name.
+    Returns list of {session_id, name, status, session_link, _tc_id}.
+    """
+    if not tc_internal_ids or not LT_ACCESS_KEY:
+        return []
+    resp = _request("GET", f"{SESSIONS_URL}?limit=50") or {}
+    raw = resp.get("data", {})
+    sessions_raw = raw.get("sessions", raw) if isinstance(raw, dict) else raw
+    if not isinstance(sessions_raw, list):
+        return []
+    result = []
+    for s in sessions_raw:
+        name = s.get("name", "") or s.get("test_name", "")
+        m = re.search(r'TC-\d+', name)
+        if m and m.group(0) in tc_internal_ids:
+            result.append({
+                "session_id":   s.get("session_id", "") or s.get("id", ""),
+                "name":         name,
+                "status":       s.get("status_ind", s.get("status", "")),
+                "session_link": s.get("session_url", "") or s.get("public_url", ""),
+                "_tc_id":       m.group(0),
+            })
+    return result
+
+
 # ── Step 3: Map session name → SC ID ─────────────────────────────────────────
 
 def _session_to_sc_id(session_name: str) -> str:
@@ -193,45 +222,56 @@ def _summarize(raw: str, sc_id: str) -> str:
 
 HISTORY_FILE = CI_DIR / "run_history.json"
 
-def update_history_from_he(build_name: str, flow: str = "flow2", log=None) -> dict:
+def update_history_from_he(build_name: str, flow: str = "flow2", log=None, tc_to_sc: dict = None) -> dict:
     """
-    Fetch HE session results for a build and overwrite run_history.json with
-    actual HE pass/fail — so the traceability matrix reflects execution truth,
-    not just kane-cli authoring status.
+    Fetch HE session results and overwrite run_history.json with actual HE pass/fail.
 
-    Called by flow1/flow2 pipelines after Phase 3 (HE job completes).
-    Retries up to 3 times with 20s delay to allow LT API to index sessions.
+    tc_to_sc: {"TC-41961": "SC-001", ...} — when provided, sessions are fetched by TC
+              internal IDs (TM-triggered HE doesn't share a common build name).
+              Falls back to build_name query when tc_to_sc is None.
     """
     if not LT_ACCESS_KEY:
         return {}
 
-    # LT Automation API may take a few seconds to index sessions after HE finishes
-    sessions = []
-    for attempt in range(1, 4):
-        sessions = fetch_sessions_for_build(build_name, log)
-        if sessions:
-            break
-        msg = f"[rca] No sessions found for build '{build_name}' (attempt {attempt}/3) — waiting 20s..."
-        print(msg) if not log else log.warning(msg)
-        time.sleep(20)
-
-    if not sessions:
-        msg = f"[rca] No sessions found for build '{build_name}' after retries — run_history unchanged"
-        print(msg) if not log else log.warning(msg)
-        return {}
-
-    # Log what the API returned so we can diagnose mapping failures
     _log = lambda m: print(m) if not log else log.info(m)
-    _log(f"[rca] Found {len(sessions)} session(s) for build '{build_name}'")
+
+    if tc_to_sc:
+        # TM-triggered HE: each test case has its own build UUID — match by TC internal IDs
+        tc_internal_ids = set(tc_to_sc.keys())
+        sessions = _fetch_sessions_by_tc_ids(tc_internal_ids)
+        if not sessions:
+            msg = f"[rca] No sessions found by TC IDs {tc_internal_ids} — run_history unchanged"
+            print(msg) if not log else log.warning(msg)
+            return {}
+        def _sc_id_for(s):
+            return tc_to_sc.get(s.get("_tc_id", ""), "")
+    else:
+        # Legacy: flow1 / direct HE with a shared build name
+        sessions = []
+        for attempt in range(1, 4):
+            sessions = fetch_sessions_for_build(build_name, log)
+            if sessions:
+                break
+            msg = f"[rca] No sessions found for build '{build_name}' (attempt {attempt}/3) — waiting 20s..."
+            print(msg) if not log else log.warning(msg)
+            time.sleep(20)
+        if not sessions:
+            msg = f"[rca] No sessions found for build '{build_name}' after retries — run_history unchanged"
+            print(msg) if not log else log.warning(msg)
+            return {}
+        def _sc_id_for(s):
+            return _session_to_sc_id(s["name"])
+
+    _log(f"[rca] Found {len(sessions)} session(s)")
     for s in sessions:
-        sc_id = _session_to_sc_id(s["name"])
+        sc_id = _sc_id_for(s)
         _log(f"[rca]   session '{s['name']}' → sc_id='{sc_id}' status={s['status']}")
 
     # Deduplicate sessions by sc_id — "passed" wins over "failed".
     # HE retries create multiple sessions per SC; if any attempt passed, the SC passed.
-    best: dict = {}  # sc_id → best session dict
+    best: dict = {}
     for s in sessions:
-        sc_id = _session_to_sc_id(s["name"])
+        sc_id = _sc_id_for(s)
         if not sc_id:
             continue
         he_status = "passed" if s["status"] == "passed" else "failed"
@@ -250,7 +290,6 @@ def update_history_from_he(build_name: str, flow: str = "flow2", log=None) -> di
             history[sc_id]["status"]       = he_status
             history[sc_id]["flow"]         = flow
             history[sc_id]["session_link"] = s.get("session_link", "")
-            # Preserve Phase 1 failure_detail — HE failures have no detail of their own.
             if he_status == "failed" and not history[sc_id].get("failure_detail", "").strip():
                 history[sc_id]["failure_detail"] = f"[HE execution failed — session: {s.get('session_link', '')}]"
         updated[sc_id] = he_status
@@ -353,44 +392,47 @@ def _claude_rca_from_history(sc_ids: list, log=None) -> dict:
 
     return results
 
-def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None) -> dict:
+def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None, tc_to_sc: dict = None) -> dict:
     """
     Full RCA pipeline for one HE job.
     Returns {sc_id: rca_text} and saves ci/rca_results.json.
 
-    For each failed session, polls the per-session RCA endpoint until
-    data arrives (up to 120s) rather than using a fixed sleep.
+    tc_to_sc: {"TC-41961": "SC-001", ...} — when provided, sessions are fetched by
+              TC internal IDs (TM-triggered HE doesn't share a common build name).
     """
     if not LT_ACCESS_KEY or not job_id:
         if log:
             log.warning("[rca] Skipping — LT_ACCESS_KEY or job_id missing")
         return {}
 
-    # Load existing results to preserve previous SCs
     existing = json.loads(RCA_FILE.read_text()) if RCA_FILE.exists() else {}
-
-    # Trigger RCA generation
     triggered = trigger_rca_for_job(job_id, log)
 
-    # Brief initial wait to let LT AI start processing
     if triggered > 0:
-        wait_secs = 10
-        msg = f"[rca] Waiting {wait_secs}s for AI RCA generation to start..."
-        if log:
-            log.info(msg)
-        else:
-            print(msg)
-        time.sleep(wait_secs)
+        msg = "[rca] Waiting 10s for AI RCA generation to start..."
+        print(msg) if not log else log.info(msg)
+        time.sleep(10)
 
-    # Fetch sessions for this build (retry up to 3x if not indexed yet)
-    sessions = []
-    for attempt in range(1, 4):
-        sessions = fetch_sessions_for_build(build_name, log)
-        if sessions:
-            break
-        msg = f"[rca] No sessions found for build '{build_name}' (attempt {attempt}/3) — waiting 15s..."
-        print(msg) if not log else log.warning(msg)
-        time.sleep(15)
+    # Fetch sessions — prefer TC-id mapping when available
+    if tc_to_sc:
+        tc_internal_ids = set(tc_to_sc.keys())
+        sessions = _fetch_sessions_by_tc_ids(tc_internal_ids)
+        if not sessions:
+            msg = f"[rca] No sessions found by TC IDs {tc_internal_ids}"
+            print(msg) if not log else log.warning(msg)
+        def _sc_id_for(s):
+            return tc_to_sc.get(s.get("_tc_id", ""), "")
+    else:
+        sessions = []
+        for attempt in range(1, 4):
+            sessions = fetch_sessions_for_build(build_name, log)
+            if sessions:
+                break
+            msg = f"[rca] No sessions found for build '{build_name}' (attempt {attempt}/3) — waiting 15s..."
+            print(msg) if not log else log.warning(msg)
+            time.sleep(15)
+        def _sc_id_for(s):
+            return _session_to_sc_id(s["name"])
 
     results = dict(existing)
 
@@ -399,10 +441,9 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None) -> dict:
     if triggered == 0:
         msg = "[rca] triggered=0 — LT AI RCA unavailable; generating Claude RCA from failure details"
         print(msg) if not log else log.info(msg)
-        # Deduplicate sessions by sc_id, passed wins — mirrors update_history_from_he logic
         _best: dict = {}
         for s in sessions:
-            sc_id = _session_to_sc_id(s["name"])
+            sc_id = _sc_id_for(s)
             if not sc_id:
                 continue
             st = "passed" if s["status"] == "passed" else "failed"
@@ -421,7 +462,7 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None) -> dict:
                 "rca":          rca_text,
                 "raw":          "",
                 "session_link": next((s["session_link"] for s in sessions
-                                      if _session_to_sc_id(s["name"]) == sc_id), ""),
+                                      if _sc_id_for(s) == sc_id), ""),
                 "session_id":   "",
                 "source":       "claude-fallback",
             }
@@ -433,11 +474,10 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None) -> dict:
     for s in sessions:
         if s["status"] not in ("failed", "error"):
             continue
-        sc_id = _session_to_sc_id(s["name"])
+        sc_id = _sc_id_for(s)
         if not sc_id:
             continue
 
-        # Poll until RCA data arrives for this failed session (up to 2 min)
         raw = _poll_session_rca(s["session_id"], sc_id, timeout=120, interval=10, log=log)
         if not raw:
             continue
@@ -450,18 +490,11 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None) -> dict:
             "session_id":   s["session_id"],
         }
         msg = f"[rca] {sc_id} RCA → {rca_text[:80]}..."
-        if log:
-            log.info(msg)
-        else:
-            print(msg)
+        print(msg) if not log else log.info(msg)
 
     RCA_FILE.write_text(json.dumps(results, indent=2))
     msg = f"[rca] Saved {len(results)} RCA entries to {RCA_FILE.name}"
-    if log:
-        log.info(msg)
-    else:
-        print(msg)
-
+    print(msg) if not log else log.info(msg)
     return results
 
 
