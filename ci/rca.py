@@ -469,7 +469,19 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None, tc_to_sc:
     _log = lambda m: (log.info(m) if log else print(m))
 
     # Step 1: Trigger (or confirm already generated)
-    trigger_info     = trigger_rca_for_job(job_id, log)
+    # Retry up to 3 times with 30s gaps — HE sessions may not be indexed yet
+    # when we call immediately after job completion.
+    trigger_info = {"triggered": 0, "skipped_already": 0}
+    for attempt in range(1, 4):
+        trigger_info  = trigger_rca_for_job(job_id, log)
+        newly_triggered = trigger_info.get("triggered", 0)
+        already_done    = trigger_info.get("skipped_already", 0)
+        if newly_triggered > 0 or already_done > 0:
+            break
+        if attempt < 3:
+            _log(f"[rca] triggered=0 skipped_already=0 (attempt {attempt}/3) — waiting 30s for LT indexing...")
+            time.sleep(30)
+
     newly_triggered  = trigger_info.get("triggered", 0)
     already_done     = trigger_info.get("skipped_already", 0)
     lt_rca_available = newly_triggered > 0 or already_done > 0
