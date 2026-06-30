@@ -440,13 +440,12 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None, tc_to_sc:
 
     results = {}
 
-    # If LT AI RCA trigger returned 0 (Flow 2 KaneAI TM sessions not indexed),
-    # wait briefly and try session-level RCA before falling back to Claude.
+    # If LT AI RCA trigger returned 0 (Flow 2 KaneAI TM sessions not indexed by job),
+    # LT AI RCA is still generated at the session level — poll each failed session
+    # before falling back to Claude (which produces generic "browser session" errors).
     if triggered == 0:
-        msg = "[rca] triggered=0 — waiting 30s then checking session-level RCA before Claude fallback..."
+        msg = "[rca] triggered=0 — polling session-level LT AI RCA before Claude fallback..."
         print(msg) if not log else log.info(msg)
-        time.sleep(30)
-        # Attempt per-session RCA for failed sessions
         _rca_found = False
         for s in sessions:
             if s["status"] not in ("failed", "error"):
@@ -454,7 +453,8 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None, tc_to_sc:
             sc_id = _sc_id_for(s)
             if not sc_id or not s.get("session_id"):
                 continue
-            raw = _fetch_session_rca(s["session_id"])
+            # Use _poll_session_rca (retries up to 120s) — gives LT AI time to generate
+            raw = _poll_session_rca(s["session_id"], sc_id, timeout=120, interval=15, log=log)
             if raw:
                 rca_text = _summarize(raw, sc_id)
                 results[sc_id] = {
@@ -464,11 +464,11 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None, tc_to_sc:
                     "session_id":   s["session_id"],
                 }
                 _rca_found = True
-                msg = f"[rca] {sc_id} session RCA found → {rca_text[:80]}..."
+                msg = f"[rca] {sc_id} LT AI session RCA → {rca_text[:80]}..."
                 print(msg) if not log else log.info(msg)
         if _rca_found:
             RCA_FILE.write_text(json.dumps(results, indent=2))
-            msg = f"[rca] Saved {len(results)} session RCA entries (triggered=0 path)"
+            msg = f"[rca] Saved {len(results)} LT AI session RCA entries (triggered=0 path)"
             print(msg) if not log else log.info(msg)
             return results
 
