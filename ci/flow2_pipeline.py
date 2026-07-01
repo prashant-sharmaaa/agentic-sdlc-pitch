@@ -438,24 +438,31 @@ def phase1_run_objectives(objectives=None):
                 log.warning(f"[{sc['id']}] transient infra failure detected — retrying with same objective (no heal)")
                 status, session_id, failure_detail = run_kane(sc)
 
-            # Tier 2: still failing after infra-retry → logic failure → heal + retry
-            if status != "passed" and failure_detail:
-                log.warning(f"[{sc['id']}] authoring failed — attempting inline heal + retry")
+            # Tier 2: still failing after infra-retry → logic failure → heal + retry (up to 2 attempts)
+            for heal_attempt in range(1, 3):
+                if status == "passed" or not failure_detail:
+                    break
+                log.warning(f"[{sc['id']}] authoring failed — inline heal attempt {heal_attempt}/2")
                 original_obj = sc.get("objective", "")
                 healed_obj = heal_single_objective(sc, failure_detail, log)
-                if healed_obj:
-                    log.info(f"[{sc['id']}] ── inline heal objective comparison ──")
-                    log.info(f"[{sc['id']}]   BEFORE: {original_obj}")
-                    log.info(f"[{sc['id']}]   AFTER : {healed_obj}")
-                    sc_retry = {**sc, "objective": healed_obj}
-                    s2, sid2, fd2 = run_kane(sc_retry)
-                    if s2 == "passed":
-                        log.info(f"[{sc['id']}] retry PASSED with healed objective ✓")
-                        status, session_id, failure_detail = s2, sid2, fd2
-                        sc = sc_retry
-                        healed = True
-                    else:
-                        log.warning(f"[{sc['id']}] retry also failed with healed objective")
+                if not healed_obj:
+                    break
+                log.info(f"[{sc['id']}] ── inline heal objective comparison (attempt {heal_attempt}) ──")
+                log.info(f"[{sc['id']}]   BEFORE: {original_obj}")
+                log.info(f"[{sc['id']}]   AFTER : {healed_obj}")
+                sc_retry = {**sc, "objective": healed_obj}
+                s2, sid2, fd2 = run_kane(sc_retry)
+                if s2 == "passed":
+                    log.info(f"[{sc['id']}] retry PASSED with healed objective (attempt {heal_attempt}) ✓")
+                    status, session_id, failure_detail = s2, sid2, fd2
+                    sc = sc_retry
+                    healed = True
+                    break
+                else:
+                    log.warning(f"[{sc['id']}] heal attempt {heal_attempt} also failed — {'trying one more heal' if heal_attempt == 1 else 'giving up'}")
+                    # Use fresh failure detail from this attempt for the next heal iteration
+                    failure_detail = fd2 or failure_detail
+                    sc = sc_retry
         tc_id = get_testcase_id_from_session(session_id)
         return idx, {
             "sc_id":          sc_id,
