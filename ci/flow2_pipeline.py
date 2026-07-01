@@ -710,6 +710,11 @@ if __name__ == "__main__":
                 if healed:
                     if _OBJECTIVES_FILE.exists():
                         SC_OBJECTIVES = json.loads(_OBJECTIVES_FILE.read_text())
+                        log.info("[self-heal] ── cross-run healed objectives (used this run) ──")
+                        for obj in SC_OBJECTIVES:
+                            if obj.get("healed_from"):
+                                log.info(f"[self-heal] {obj['id']} BEFORE: {obj['healed_from']}")
+                                log.info(f"[self-heal] {obj['id']} AFTER : {obj['objective']}")
 
     if args.skip_phase1:
         last_run_file = Path(__file__).parent / "last_run.json"
