@@ -17,15 +17,15 @@
     "id": "SC-003",
     "ac_id": "AC-004",
     "name": "SC-003: Product Name Opens Detail Page",
-    "objective": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, click on the Sauce Labs Backpack product title link on the inventory page, and verify the Add to cart button is visible on the product detail page.",
-    "healed_from": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, click the product name Sauce Labs Backpack, and verify the product detail heading Sauce Labs Backpack is visible."
+    "objective": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, click the Sauce Labs Backpack image or title to open its detail page, and verify the text \"Sauce Labs Backpack\" is visible as a heading on the product detail page.",
+    "healed_from": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, click on the Sauce Labs Backpack product title link on the inventory page, and verify the Add to cart button is visible on the product detail page."
   },
   {
     "id": "SC-004",
     "ac_id": "AC-016",
     "name": "SC-004: Sort by Price Low to High",
-    "objective": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, select Price (low to high) from the sort dropdown, and verify the price $9.99 is visible.",
-    "healed_from": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, select Price (low to high) from the sort dropdown, and verify the text Sauce Labs Bike Light is visible."
+    "objective": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, select Price (low to high) from the sort dropdown, and verify the price $7.99 is visible.",
+    "healed_from": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, select Price (low to high) from the sort dropdown, and verify the price $9.99 is visible."
   },
   {
     "id": "SC-005",
