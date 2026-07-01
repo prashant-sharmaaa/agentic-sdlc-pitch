@@ -35,9 +35,10 @@ RCA_FILE     = CI_DIR / "rca_results.json"
 LT_USERNAME   = os.environ.get("LT_USERNAME", "gagandeepb")
 LT_ACCESS_KEY = os.environ.get("LT_ACCESS_KEY", "")
 
-RCA_TRIGGER_URL = "https://api.lambdatest.com/insights/api/v3/public/rca/generate"
-SESSIONS_URL    = "https://api.lambdatest.com/automation/api/v1/sessions"
-SESSION_RCA_URL = "https://api.lambdatest.com/automation/api/v1/sessions/{sid}/rca"
+RCA_TRIGGER_URL    = "https://api.lambdatest.com/insights/api/v3/public/rca/generate"
+SESSIONS_URL       = "https://api.lambdatest.com/automation/api/v1/sessions"
+SESSION_RCA_URL    = "https://api.lambdatest.com/automation/api/v1/sessions/{sid}/rca"
+HE_JOB_SESSIONS_URL = "https://api.hyperexecute.cloud/v2.0/job/{job_id}/sessions"
 
 # Build name used by Flow 1 HyperExecute yaml
 FLOW1_BUILD_NAME = "Agentic SDLC | KaneAI Export"
@@ -51,7 +52,11 @@ def _request(method: str, url: str, payload: dict = None) -> dict:
     data = json.dumps(payload).encode() if payload else None
     req  = urllib.request.Request(
         url, data=data,
-        headers={"Authorization": _auth_header(), "Content-Type": "application/json"},
+        headers={
+            "Authorization": _auth_header(),
+            "Content-Type":  "application/json",
+            "User-Agent":    "Mozilla/5.0",   # required — api.hyperexecute.cloud blocks Python's default UA via Cloudflare
+        },
         method=method,
     )
     try:
@@ -209,6 +214,38 @@ def _fetch_sessions_by_tc_ids(tc_internal_ids: set, exclude_ids: set = None) -> 
     return result
 
 
+def _fetch_he_job_sessions(job_id: str, log=None) -> list:
+    """
+    GET /v2.0/job/{jobID}/sessions — sessions scoped exactly to this HE job.
+    No flood from reused TC IDs across runs (no exclude_ids needed).
+    Returns list of {session_id, name, status, session_link, _tc_id}.
+    """
+    if not job_id or not LT_ACCESS_KEY:
+        return []
+    url  = HE_JOB_SESSIONS_URL.format(job_id=job_id)
+    resp = _request("GET", url) or {}
+    raw  = resp.get("data", [])
+    if not isinstance(raw, list):
+        return []
+    result = []
+    for s in raw:
+        name = s.get("name", "")
+        m    = re.search(r'TC-\d+', name)
+        if not m:
+            continue
+        sid = s.get("sessionID", "") or s.get("testID", "")
+        result.append({
+            "session_id":   sid,
+            "name":         name,
+            "status":       s.get("status", ""),
+            "session_link": f"https://automation.lambdatest.com/test-details?testID={sid}" if sid else "",
+            "_tc_id":       m.group(0),
+        })
+    if log:
+        log.info(f"[rca] HE job sessions: {len(result)} for job {job_id}")
+    return result
+
+
 # ── Step 3: Map session name → SC ID ─────────────────────────────────────────
 
 def _session_to_sc_id(session_name: str) -> str:
@@ -267,15 +304,15 @@ def _summarize(raw: str, sc_id: str) -> str:
 
 HISTORY_FILE = CI_DIR / "run_history.json"
 
-def update_history_from_he(build_name: str, flow: str = "flow2", log=None, tc_to_sc: dict = None, exclude_ids: set = None) -> dict:
+def update_history_from_he(build_name: str, flow: str = "flow2", log=None, tc_to_sc: dict = None, exclude_ids: set = None, job_id: str = None) -> dict:
     """
     Fetch HE session results and overwrite run_history.json with actual HE pass/fail.
 
     tc_to_sc: {"TC-41961": "SC-001", ...} — when provided, sessions are fetched by TC
               internal IDs (TM-triggered HE doesn't share a common build name).
               Falls back to build_name query when tc_to_sc is None.
-    exclude_ids: session IDs captured before HE trigger — sessions from previous runs
-                 with the same reused TC IDs are excluded from results.
+    job_id:   When provided, uses GET /v2.0/job/{jobID}/sessions (job-scoped, no flood).
+              Falls back to automation sessions API with exclude_ids when not provided.
     """
     if not LT_ACCESS_KEY:
         return {}
@@ -283,11 +320,14 @@ def update_history_from_he(build_name: str, flow: str = "flow2", log=None, tc_to
     _log = lambda m: print(m) if not log else log.info(m)
 
     if tc_to_sc:
-        # TM-triggered HE: each test case has its own build UUID — match by TC internal IDs
-        tc_internal_ids = set(tc_to_sc.keys())
-        sessions = _fetch_sessions_by_tc_ids(tc_internal_ids, exclude_ids=exclude_ids)
+        # Prefer HE sessions API (job-scoped, no flood from reused TC IDs)
+        if job_id:
+            sessions = _fetch_he_job_sessions(job_id, log)
+        else:
+            tc_internal_ids = set(tc_to_sc.keys())
+            sessions = _fetch_sessions_by_tc_ids(tc_internal_ids, exclude_ids=exclude_ids)
         if not sessions:
-            msg = f"[rca] No sessions found by TC IDs {tc_internal_ids} — run_history unchanged"
+            msg = f"[rca] No sessions found for job {job_id or list(tc_to_sc.keys())} — run_history unchanged"
             print(msg) if not log else log.warning(msg)
             return {}
         def _sc_id_for(s):
@@ -498,11 +538,15 @@ def run_rca(job_id: str, build_name: str = FLOW1_BUILD_NAME, log=None, tc_to_sc:
         time.sleep(90)
 
     # Step 2: Fetch sessions → build session_id → sc_id mapping
+    # Use HE sessions API (job-scoped, no flood) — fallback to automation sessions API
     if tc_to_sc:
-        tc_internal_ids = set(tc_to_sc.keys())
-        sessions = _fetch_sessions_by_tc_ids(tc_internal_ids, exclude_ids=exclude_ids)
+        sessions = _fetch_he_job_sessions(job_id, log)
         if not sessions:
-            _log(f"[rca] No sessions found by TC IDs {tc_internal_ids}")
+            _log(f"[rca] HE sessions API returned no results — falling back to automation sessions API")
+            tc_internal_ids = set(tc_to_sc.keys())
+            sessions = _fetch_sessions_by_tc_ids(tc_internal_ids, exclude_ids=exclude_ids)
+        if not sessions:
+            _log(f"[rca] No sessions found for job {job_id}")
         def _sc_id_for(s):
             return tc_to_sc.get(s.get("_tc_id", ""), "")
     else:

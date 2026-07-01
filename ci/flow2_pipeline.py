@@ -146,7 +146,11 @@ def api_request(method, url, payload=None):
     data = json.dumps(payload).encode() if payload else None
     req  = urllib.request.Request(
         url, data=data,
-        headers={"Authorization": AUTH, "Content-Type": "application/json"},
+        headers={
+            "Authorization": AUTH,
+            "Content-Type":  "application/json",
+            "User-Agent":    "Mozilla/5.0",   # required for api.hyperexecute.cloud (Cloudflare UA filter)
+        },
         method=method,
     )
     try:
@@ -564,44 +568,40 @@ def phase2_fetch_test_cases(kane_results):
 
 # ── Phase 3: Create test run + trigger HyperExecute ──────────────────────────
 
+HE_STATUS_API = "https://api.hyperexecute.cloud/v2.0/job/{job_id}"
+HE_FINAL_STATUSES = {"completed", "failed", "cancelled", "aborted", "error"}
+
+
 def poll_he_job(job_id: str, tc_internal_ids: set, timeout: int = 1800, log=None, exclude_ids: set = None) -> str:
     """
-    Poll automation sessions API until all sessions for this HE job reach a final
-    status (passed/failed/cancelled/error) or timeout is reached.
+    Poll HE job status API until the job reaches a final state or timeout.
     Returns 'completed' or 'timeout'.
 
-    TM-triggered HE sessions are named "Web || gagandeepb || TC-41961" and each
-    test case gets its own build UUID — there is no shared build name across the job.
-    We match sessions by tc_internal_ids ({"TC-41961", "TC-41962", ...}).
+    Uses GET /v2.0/job/{jobID} directly — no session matching needed.
+    tc_internal_ids and exclude_ids are retained for API compatibility but unused here.
     """
-    from rca import _fetch_sessions_by_tc_ids
     _log = lambda m: (log.info(m) if log else print(m))
-    FINAL = {"passed", "failed", "cancelled", "error", "skipped", "stopped", "completed"}
 
-    if not tc_internal_ids:
-        _log("[he-poll] No TC internal IDs available — skipping HE poll (Phase 2 may have failed)")
+    if not job_id:
+        _log("[he-poll] No job ID — skipping poll")
         return "skipped"
 
-    _log(f"[he-poll] Waiting for HE job {job_id} to complete (timeout={timeout}s)...")
-    _log(f"[he-poll] Tracking TC IDs: {tc_internal_ids}")
-    time.sleep(60)  # warm-up — HE takes time to start sessions
+    _log(f"[he-poll] Polling HE job status API for {job_id} (timeout={timeout}s)...")
+    time.sleep(30)  # brief warm-up before first check
 
-    elapsed = 60
+    elapsed = 30
     while elapsed < timeout:
-        sessions = _fetch_sessions_by_tc_ids(tc_internal_ids, exclude_ids=exclude_ids)
-        if sessions:
-            statuses = {s["status"] for s in sessions}
-            pending  = statuses - FINAL
-            seen_tcs = {s.get("_tc_id") for s in sessions}
-            missing_tcs = tc_internal_ids - seen_tcs
-            _log(f"[he-poll] {len(sessions)} session(s) — statuses: {dict((s, sum(1 for x in sessions if x['status']==s)) for s in statuses)}")
-            if missing_tcs:
-                _log(f"[he-poll] Waiting for sessions to appear for: {missing_tcs}")
-            elif not pending:
-                _log(f"[he-poll] All {len(tc_internal_ids)} TC(s) in final state after {elapsed}s")
+        try:
+            resp = api_request("GET", HE_STATUS_API.format(job_id=job_id))
+            data   = resp.get("data", {})
+            status = (data.get("status") or "").lower()
+            task_count = data.get("taskCount", {})
+            _log(f"[he-poll] status={status!r}  taskCount={task_count}  elapsed={elapsed}s")
+            if status in HE_FINAL_STATUSES:
+                _log(f"[he-poll] HE job {job_id} reached final status '{status}' after {elapsed}s")
                 return "completed"
-        else:
-            _log(f"[he-poll] No sessions yet (elapsed={elapsed}s) — waiting...")
+        except Exception as e:
+            _log(f"[he-poll] API error: {e} — retrying in 30s...")
         time.sleep(30)
         elapsed += 30
 
@@ -781,16 +781,6 @@ if __name__ == "__main__":
             tc_internal_ids.add(internal)
     log.info(f"[poll] TC→SC mapping: {tc_to_sc}")
 
-    # Snapshot pre-existing session IDs BEFORE triggering HE.
-    # Reused TC IDs (e.g. TC-42299) accumulate sessions across runs — fetching the
-    # 100 most recent sessions would include old runs. By capturing IDs now and passing
-    # them as exclude_ids, we avoid any timezone-sensitive timestamp comparison.
-    from rca import _fetch_sessions_by_tc_ids as _snap_sessions
-    pre_existing_sids: set = set()
-    if tc_internal_ids:
-        pre_existing_sids = {s["session_id"] for s in _snap_sessions(tc_internal_ids)}
-        log.info(f"[poll] Pre-existing session IDs (will be excluded): {pre_existing_sids or 'none'}")
-
     job_id, job_link, tm_report_url = phase3_trigger_he(test_cases)
 
     # Persist HE job
@@ -798,15 +788,14 @@ if __name__ == "__main__":
         record_he_job("flow2", job_id, job_link, tm_report_url=tm_report_url)
 
         # Wait for HE job to finish before fetching results / running RCA
-        poll_he_job(job_id, tc_internal_ids, timeout=1800, log=log, exclude_ids=pre_existing_sids)
+        poll_he_job(job_id, tc_internal_ids, timeout=1800, log=log)
 
-        # Give HE 30s grace period — "completed" sessions may still have a retry
-        # in flight; waiting ensures the retry result is visible in the sessions API
+        # Give HE 30s grace period — completed sessions may still have a retry in flight
         log.info("[flow2] Waiting 30s for HE retry sessions to settle...")
         time.sleep(30)
 
         # Override run_history with actual HE pass/fail (not kane-cli Phase 1 status)
-        update_history_from_he(SESSION_BUILD_NAME, flow="flow2", log=log, tc_to_sc=tc_to_sc, exclude_ids=pre_existing_sids)
+        update_history_from_he(SESSION_BUILD_NAME, flow="flow2", log=log, tc_to_sc=tc_to_sc, job_id=job_id)
 
         # Give LT insights engine time to index the completed HE sessions.
         # The automation sessions API indexes fast (used above), but the insights
@@ -815,7 +804,7 @@ if __name__ == "__main__":
         time.sleep(120)
 
         # RCA only for failed test sessions (skips automatically if triggered=0)
-        run_rca(job_id, build_name=SESSION_BUILD_NAME, log=log, tc_to_sc=tc_to_sc, exclude_ids=pre_existing_sids)
+        run_rca(job_id, build_name=SESSION_BUILD_NAME, log=log, tc_to_sc=tc_to_sc)
 
     # Build traceability matrix after HE results are in
     run_traceability(log)
