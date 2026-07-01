@@ -52,17 +52,34 @@ RULES for rewriting (no exceptions):
 6. Do not add step counts or micro-instructions.
 7. If the failure suggests a timing issue, simplify — verify something static (a heading, a count, visible text).
 8. Credentials must stay inline in the objective if the original had them.
+9. ASSERTION QUALITY — the assertion is the most common failure point. Follow these rules:
+   a. NEVER assert on long description sentences or body copy — they are hard to match exactly.
+      BAD: "verify the description text 'It's not every day that you find a store...'"
+      GOOD: "verify the text $29.99 is visible" or "verify the Add to cart button is visible"
+   b. NEVER use text that contains special characters like parentheses (), brackets [], dots in method-call
+      format (e.g. carry.allTheThings()), or code-style strings — vision models match these inconsistently.
+      BAD: "verify the text carry.allTheThings() is visible"
+      GOOD: "verify the Back to products button is visible"
+   c. For tests that navigate to a new page, assert on a landmark UI element unique to that page
+      (a navigation button, a section heading, a price, a badge count) — NOT on body paragraph text.
+      BAD: "verify the product detail page shows the description text '...'"
+      GOOD: "verify the Back to products button is visible" or "verify the price $29.99 is visible"
+   d. Prefer short, exact labels that appear as buttons, headings, links, or badges — these are
+      the most reliably readable elements for vision-based assertion.
 
 GOOD — one click, assertion visible immediately:
   "Login to https://app.com/ as user with password pass, click the Add to cart button for Item X, and verify the cart badge shows 1."
   "Login to https://app.com/ as user with password pass, click the cart icon, and verify the heading Your Cart is visible."
   "Login to https://app.com/ as user with password pass, select Price low to high from the sort dropdown, and verify the price $7.99 is visible."
+  "Login to https://app.com/ as user with password pass, click the Item X product name, and verify the Back to products button is visible."
 
 BAD (NEVER write these):
   "...add Item X to the cart and navigate to the cart page, and verify..." — navigation is a second action
   "...add Item X to the cart and click Remove, and verify..." — TWO interactions
   "...verify the button changes to Remove" — state transition, timing-sensitive
   "...add to cart and verify badge, then click Remove and verify..." — TWO verifications
+  "...verify the description text 'It's not every day...'" — long body copy, fragile exact match
+  "...verify the text carry.allTheThings() is visible" — special characters, vision model unreliable
 """
 
 
