@@ -1,4 +1,4 @@
-# Agentic SDLC — LambdaTest
+# Agentic SDLC — Testmu AI
 
 > Requirements go in. **KaneAI authors the tests.** HyperExecute runs them. AI explains failures. Objectives auto-improve every run.
 
@@ -6,13 +6,13 @@
 
 ## What this is
 
-A fully automated testing pipeline where **KaneAI** — LambdaTest's AI browser agent — authors every test case from a plain-English objective. No selectors. No scripts. No page objects.
+A fully automated testing pipeline where **KaneAI** — Testmu AI's browser agent — authors every test case from a plain-English objective. No selectors. No scripts. No page objects.
 
 You give KaneAI an objective:
 
 > *"Login to saucedemo as standard_user with password secret_sauce, click the Add to cart button for Sauce Labs Backpack, and verify the cart badge shows 1."*
 
-KaneAI opens a real browser, figures out the UI, executes the steps, and saves the verified test directly into LambdaTest Test Manager. HyperExecute runs it in parallel. If it fails, Claude explains why and rewrites the objective — automatically, before the next run.
+KaneAI opens a real browser, figures out the UI, executes the steps, and saves the verified test directly into Testmu AI Test Manager. HyperExecute runs it in parallel. If it fails, Claude explains why and rewrites the objective — automatically, before the next run.
 
 ---
 
@@ -33,16 +33,17 @@ Push to main  ──────────────────────
                     ↓
          Cross-run self-heal (start of run)
          └── Claude pre-heals objectives that failed last run
+             using LT AI RCA as context for HE failures
                     ↓
          kane-cli runs each objective on a real browser (KaneAI)
-         ├── 3 SCs run in parallel (staggered 3s apart)
+         ├── 3 SCs in parallel, staggered 3s apart
          ├── Tier 1 — Infra retry: CDP/browser crash → retry same objective
          ├── Tier 2 — Inline self-heal: logic failure → Claude rewrites → immediate retry
-         └── saves verified test to LambdaTest Test Manager
+         └── saves verified test to Testmu AI Test Manager
                     ↓
          Test Run created in TM → instances linked with environment
                     ↓
-         HyperExecute runs all tests in parallel (5 VMs, 1 retry)
+         HyperExecute runs all tests in parallel (5 VMs, 1 retry per test)
          └── pipeline polls until all sessions reach final state
                     ↓
          Wait 120s for LT insights engine to index HE sessions
@@ -57,7 +58,7 @@ Push to main  ──────────────────────
          └── HE job link + TM Test Run Report link
                     ↓
          Auto-improve: Claude rewrites objectives for all failed SCs
-         ├── Phase 1 failure → uses kane-cli run summary
+         ├── Phase 1 failure → uses kane-cli run summary as context
          ├── HE execution failure → uses LT AI RCA as context
          └── commits improved objectives.json back to main [skip ci]
 ```
@@ -74,7 +75,57 @@ On the **next push**, the pipeline starts from the improved objectives automatic
 | **Manual dispatch — no URL** | Same as push — uses committed `objectives.json` |
 | **Manual dispatch + requirements URL** | Downloads doc → Claude extracts ACs → Claude generates objectives → full pipeline |
 
-> Auto-improve commits use `[skip ci]` so they don't re-trigger the pipeline.
+> Auto-improve commits use `[skip ci]` so they don't re-trigger the pipeline indefinitely.
+
+---
+
+## Design Decisions
+
+### Why 3 parallel workers for kane-cli?
+
+KaneAI authoring spins up a real browser session per SC on Testmu AI infrastructure. Running all 5 SCs simultaneously risks hitting the concurrent session limit and causes the later sessions to queue rather than start immediately. **3 is the sweet spot** — fast enough to keep total authoring time under 10 minutes, conservative enough to avoid session contention. The 3s stagger between starts further smooths the load spike.
+
+### Why inline heal AND cross-run heal?
+
+Two different problems, two different fixes:
+
+| | Inline heal | Cross-run heal |
+|--|-------------|----------------|
+| **When** | Same run, immediately after failure | Start of the next run |
+| **Why** | Saves the current run — a rewritten objective gets a second chance right now | Starts the next run from a better baseline before any SC even runs |
+| **Context** | kane-cli's live failure detail (what it just tried) | Previous run's failure detail + LT AI RCA (richer, post-execution context) |
+| **Who rewrites** | Claude Sonnet (fast, in-run) | Claude Sonnet (start of run, no time pressure) |
+
+Without inline heal, a logic failure wastes the entire run. Without cross-run heal, you'd need a human to fix the objective between runs.
+
+### Why two tiers within inline heal?
+
+- **Tier 1 (infra retry, same objective):** CDP disconnects, browser crashes, and screenshot failures are transient. Healing the objective won't fix them — just retry. Using Claude here wastes tokens and risks introducing unnecessary changes.
+- **Tier 2 (Claude heal + retry):** If the failure persists after an infra retry, it's a logic problem — the objective is ambiguous, too specific about UI coordinates, or chains too many actions. That's when Claude rewrites it.
+
+### Why 5 VMs for HyperExecute?
+
+5 VMs runs all 5 SCs simultaneously in under 2 minutes. More VMs would not reduce wall-clock time further since each SC maps to one session. Fewer VMs would serialise tests unnecessarily.
+
+### Why 1 retry on HyperExecute?
+
+Browser tests on real infrastructure can be flaky for reasons unrelated to the test logic (page load timing, transient network blip). A single retry catches these without masking real failures — two consecutive failures of the same test almost always indicate a genuine bug or a broken objective.
+
+### Why `[skip ci]` on auto-improve commits?
+
+The auto-improve step commits an updated `objectives.json` at the end of every run. Without `[skip ci]`, that commit would trigger a new pipeline run, which would commit another update, which would trigger another run — an infinite loop. The tag tells GitHub Actions to skip this commit.
+
+### Why is the objective format strictly enforced?
+
+KaneAI works best with **intent-based** objectives — describe what to verify, not how to click. Chained actions ("add to cart and then navigate to cart page") require KaneAI to hold intermediate state and are prone to timing issues. State transitions ("verify the button changes to Remove") are inherently flaky because they depend on the exact moment the assertion fires. One action + one immediately visible assertion is the pattern that produces the most reliable, reusable test cases.
+
+### Why does the reuse check exist?
+
+If an objective is unchanged from the last run and a valid TM test case already exists, re-running kane-cli would produce an identical result. Skipping kane-cli for those SCs can save 5–8 minutes of authoring time per run. Only changed objectives or first-time SCs go through the full authoring cycle.
+
+### Why does LT AI RCA need a 120s pre-wait?
+
+The LT automation sessions API (used to fetch session results) indexes sessions almost immediately after they complete. The LT insights engine (used for AI RCA) is a separate system that ingests from the sessions API asynchronously — it typically lags by 2–3 minutes. Calling the RCA trigger too early returns `triggered=0` because the engine hasn't seen the sessions yet. The 120s wait is a safety buffer so the trigger finds the sessions on the first or second attempt.
 
 ---
 
@@ -133,28 +184,30 @@ Navigate to the URL, type 'standard_user' into the username field, click the Log
 
 ### Stage 3 — KaneAI Authoring *(Phase 1)*
 
-`kane-cli run` executes each objective on a real browser. KaneAI uses AI vision — no pre-written selectors. Each verified test is saved into LambdaTest Test Manager.
+`kane-cli run` executes each objective on a real browser. KaneAI uses AI vision — no pre-written selectors. Each verified test is saved into Testmu AI Test Manager.
 
-- **3 SCs run in parallel** (staggered 3s apart)
-- **600s timeout per SC**
-- **Reuse check:** if objective is unchanged and a valid TM test case exists from a previous run, kane-cli is skipped (saves time)
-- **Tier 1 — Infra retry:** transient failures (CDP disconnect, browser crash) → retry same objective immediately
-- **Tier 2 — Inline self-heal:** logic failure → Claude (`claude-sonnet-4-6`) rewrites objective on-the-fly → immediate retry in the same run
-- **Cross-run self-heal:** at the start of every run, Claude pre-heals any objectives that failed the previous run (uses LT AI RCA as context for HE failures)
+- **3 SCs run in parallel**, staggered 3s apart — avoids concurrent session contention on LT infrastructure
+- **600s timeout per SC** — KaneAI explores the UI autonomously; complex objectives can take time
+- **Reuse check:** if objective is unchanged and a valid TM test case exists, kane-cli is skipped — saves 5–8 min per run
+- **Tier 1 — Infra retry:** transient failures (CDP disconnect, browser crash) → retry same objective immediately, no Claude call
+- **Tier 2 — Inline self-heal:** logic failure after infra retry → Claude (`claude-sonnet-4-6`) rewrites objective on-the-fly → immediate retry in the same run
+- **Cross-run self-heal:** at the start of every run, Claude pre-heals objectives that failed the previous run (uses LT AI RCA as context for HE failures, kane-cli run summary for authoring failures)
+
+The healed objective (before/after comparison) is printed to logs so you can see exactly what changed.
 
 ---
 
 ### Stage 4 — Test Run + HyperExecute *(Phases 2 & 3)*
 
-Creates a LambdaTest Test Manager test run, links all authored test cases, and triggers HyperExecute.
+Creates a Testmu AI Test Manager test run, links all authored test cases with a test environment, and triggers HyperExecute via the TM API — no `hyperexecute.yaml` needed.
 
-| Setting | Value |
-|---------|-------|
-| Environment | Configurable via `TM_ENVIRONMENT_ID` (default: Win10, Firefox, desktop) |
-| Concurrency | 5 parallel VMs |
-| Retry on failure | 1 retry |
+| Setting | Value | Why |
+|---------|-------|-----|
+| Concurrency | 5 parallel VMs | One VM per SC — maximum parallelism for 5 SCs |
+| Retry on failure | 1 retry | Catches transient flakiness without masking real bugs |
+| Environment | Configurable via `TM_ENVIRONMENT_ID` | Decouple browser/OS config from pipeline code |
 
-The pipeline polls HyperExecute until all sessions reach a final state before proceeding.
+The pipeline polls the automation sessions API until all sessions for this job reach a final state (`passed`, `failed`, `cancelled`) before proceeding to RCA.
 
 ---
 
@@ -162,25 +215,27 @@ The pipeline polls HyperExecute until all sessions reach a final state before pr
 
 Two-layer RCA for every failed scenario:
 
-**Layer 1 — LT AI RCA:**
+**Layer 1 — LT AI RCA** (for HE execution failures):
 - Waits 120s after HE completion for the LT insights engine to index sessions
 - Triggers `POST /insights/api/v3/public/rca/generate` for the HE job
 - Retries trigger up to 3× with 60s gaps if `triggered=0` (indexing lag)
-- After trigger, waits 90s for generation then fetches via `GET /rca?job_ids=...`
+- After trigger, waits 90s for AI generation then fetches via `GET /rca?job_ids=...`
 - Retries fetch up to 3× with 30s gaps if no entries returned yet
+- Each RCA entry contains: `failure_summary`, `analysis[]`, `steps_to_fix[]`
 
-**Layer 2 — Claude RCA fallback** (when LT AI RCA is unavailable):
+**Layer 2 — Claude RCA fallback** (for Phase 1 authoring failures only):
+- Fires when LT AI RCA is unavailable OR the SC failed at authoring (never made it to HE)
 - Reads kane-cli `failure_detail` from `run_history.json`
-- Generates structured analysis: what was asked, what kane-cli did, what needs fixing
-- Marked as `source: claude-fallback` — never shown in the main traceability table
+- Generates structured analysis: objective given, what kane-cli did, what needs fixing
+- Marked as `source: claude-fallback` in `rca_results.json`
 
-**Output:** `ci/rca_results.json`
+**Output:** `ci/rca_results.json` — consumed by both the traceability matrix and the auto-improve step.
 
 ---
 
 ### Stage 6 — Traceability Matrix
 
-Full matrix linking every result back to its origin — appears in GitHub Step Summary after every run.
+Full matrix linking every result back to its origin — published as GitHub Step Summary after every run.
 
 ```
 AC → Objective → SC → TM Test Case → Authoring result → HE Execution result → AI RCA
@@ -189,19 +244,20 @@ AC → Objective → SC → TM Test Case → Authoring result → HE Execution r
 Columns:
 - **Authoring** — did kane-cli successfully author the test? (Phase 1)
 - **Execution** — did HyperExecute pass the test? (Phase 3)
-- **RCA** — LT AI RCA only; blank for claude-fallback entries
+- **RCA** — LT AI RCA text inline; blank for claude-fallback entries (those go to auto-improve only)
 
 ---
 
 ### Stage 7 — Auto-Improve *(end of every run)*
 
-After HE results and RCA are in, Claude rewrites objectives for **all failed SCs**:
+After HE results and RCA are in, Claude rewrites objectives for **all failed SCs** and commits the result:
 
-- Phase 1 authoring failure → uses kane-cli run summary
-- HE execution failure → uses LT AI RCA text as healing context
-- Applies the same strict rules: 1 action, 1 immediately-visible assertion, no "changes to"
+| Failure type | Context used for healing |
+|-------------|--------------------------|
+| Phase 1 authoring failure | kane-cli run summary (what it actually tried) |
+| HE execution failure | LT AI RCA (`failure_summary` + `analysis` + `steps_to_fix`) |
 
-The improved `objectives.json` is committed with `[skip ci]`. The next push starts from better objectives automatically.
+The improved `objectives.json` is committed with `[skip ci]`. The next push automatically starts from better objectives — no human intervention needed.
 
 > Custom URL runs (`REQUIREMENTS_URL` set) never overwrite the committed saucedemo objectives — only default runs auto-improve.
 
@@ -215,8 +271,8 @@ Go to **Settings → Secrets and variables → Actions → Secrets**
 
 | Secret | Description | Where to get it |
 |--------|-------------|-----------------|
-| `LT_USERNAME` | LambdaTest username | [accounts.lambdatest.com/security](https://accounts.lambdatest.com/security) |
-| `LT_ACCESS_KEY` | LambdaTest access key | [accounts.lambdatest.com/security](https://accounts.lambdatest.com/security) |
+| `LT_USERNAME` | Testmu AI username | [accounts.lambdatest.com/security](https://accounts.lambdatest.com/security) |
+| `LT_ACCESS_KEY` | Testmu AI access key | [accounts.lambdatest.com/security](https://accounts.lambdatest.com/security) |
 | `ANTHROPIC_API_KEY` | Claude API key | [console.anthropic.com](https://console.anthropic.com) |
 
 ### 2. GitHub Variables
