@@ -393,6 +393,31 @@ def update_history_from_he(build_name: str, flow: str = "flow2", log=None, tc_to
         msg = f"[rca] Sessions found but no SC IDs mapped — check session names above"
         print(msg) if not log else log.warning(msg)
 
+    # Mark SCs expected in this HE job but with no session.
+    # This happens when a task fails before a browser session is established
+    # (e.g. test file not found, infra error). The job status API shows
+    # taskCount.failed > 0 but /sessions returns nothing for that task.
+    # Without this, traceability falls back to Phase 1 authoring status
+    # and reports a false pass.
+    if tc_to_sc:
+        missing_no_session = set(tc_to_sc.values()) - set(updated.keys())
+        if missing_no_session:
+            msg = f"[rca] {len(missing_no_session)} SC(s) submitted to HE but no session returned — marking as failed: {missing_no_session}"
+            print(msg) if not log else log.warning(msg)
+            for sc_id in missing_no_session:
+                hist_entry = history.get(sc_id, {})
+                if "authoring_status" not in hist_entry:
+                    hist_entry["authoring_status"] = hist_entry.get("status", "not_run")
+                hist_entry["he_status"]      = "failed"
+                hist_entry["status"]         = "failed"
+                hist_entry["failure_detail"] = (
+                    hist_entry.get("failure_detail") or
+                    "[HE execution failed: task failed before browser session was established]"
+                )
+                history[sc_id]  = hist_entry
+                updated[sc_id] = "failed"
+            HISTORY_FILE.write_text(json.dumps(history, indent=2))
+
     return updated
 
 
