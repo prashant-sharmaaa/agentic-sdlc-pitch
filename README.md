@@ -389,6 +389,7 @@ python3 ci/flow2_pipeline.py --skip-phase1
 | Auto-improve commit | `paths-ignore` on `ci/objectives.json` + `requirements/analyzed_requirements.json` prevents re-triggering |
 | Custom URL run | Objectives generated for that URL; never overwrites default saucedemo objectives |
 | First run (no history) | Cross-run heal skips gracefully — nothing to heal |
+| Stage 3 fails after stages 1+2 completed | Objectives, TC IDs, and working env id are saved in the failed run's artifact; next run restores them automatically — set `from_step=3` to skip re-generating objectives |
 | No `tm_environment_id` provided | Pipeline checks `ci/.working_env_id` from previous run; creates a new compatible env if none found and saves the id for future runs |
 | Bad `tm_environment_id` (KaneAI UI-created, non-HE-compatible) | Pipeline detects incompatible env, creates a working replacement, and persists the new id to `ci/.working_env_id` |
 | Private Google Doc URL | Download fails — make the doc public ("Anyone with link can view") |

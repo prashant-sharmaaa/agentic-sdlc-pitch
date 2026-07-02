@@ -134,7 +134,7 @@ jobs:
             ARTIFACT_PATTERN="flow2-results-default-*"
             echo "Default run — restoring from default artifacts only"
           fi
-          RUN_ID=$(gh run list --workflow=flow2.yml --branch=main --status=success --limit=5 --json databaseId,name -q \
+          RUN_ID=$(gh run list --workflow=flow2.yml --branch=main --status=completed --limit=5 --json databaseId,name -q \
             "[.[] | select(.name | startswith(\"Agentic SDLC\"))][0].databaseId" 2>/dev/null || echo "")
           if [ -n "$RUN_ID" ]; then
             # gh run download --name requires an exact name, not a glob.
