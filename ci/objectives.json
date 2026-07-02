@@ -24,8 +24,8 @@
     "id": "SC-004",
     "ac_id": "AC-016",
     "name": "SC-004: Sort by Price Low to High",
-    "objective": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, select Price (low to high) from the sort dropdown, and verify the text $7.99 is visible.",
-    "healed_from": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, select Price (low to high) from the sort dropdown, and verify the price $7.99 is visible on the page."
+    "objective": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, select Price (low to high) from the sort dropdown, and verify the text Sauce Labs Backpack is visible.",
+    "healed_from": "Login to https://www.saucedemo.com/ as standard_user with password secret_sauce, select Price (low to high) from the sort dropdown, and verify the price $7.99 is visible."
   },
   {
     "id": "SC-005",
