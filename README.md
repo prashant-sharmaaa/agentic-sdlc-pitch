@@ -70,13 +70,14 @@ On the **next push**, the pipeline starts from the improved objectives automatic
 
 ## Triggers
 
+The pipeline runs **only on manual dispatch** — there is no push trigger.
+
 | How | What happens |
 |-----|-------------|
-| **Push to `main`** (`ci/`, `requirements/`, `hyperexecute.yaml`) | Pipeline auto-runs using committed `objectives.json` |
-| **Manual dispatch — no URL** | Same as push — uses committed `objectives.json` |
+| **Manual dispatch — no URL** | Uses committed `objectives.json` — full pipeline from Phase 1 |
 | **Manual dispatch + requirements URL** | Downloads doc → Claude extracts ACs → Claude generates objectives → full pipeline |
 
-> Auto-improve commits only touch `ci/objectives.json` and `requirements/analyzed_requirements.json` — the workflow's `paths-ignore` excludes these files, so auto-improve commits never re-trigger the pipeline.
+Go to **Actions → Agentic SDLC → Run workflow** and fill in the required fields.
 
 ---
 
@@ -119,9 +120,9 @@ Without inline heal, a logic failure wastes the entire run. Without cross-run he
 
 Browser tests on real infrastructure can be flaky for reasons unrelated to the test logic (page load timing, transient network blip). A single retry catches these without masking real failures — two consecutive failures of the same test almost always indicate a genuine bug or a broken objective.
 
-### Why `paths-ignore` instead of `[skip ci]`?
+### Why manual dispatch only — no push trigger?
 
-The auto-improve step commits updated `objectives.json` and `analyzed_requirements.json` at the end of every run. Without loop prevention, that commit would trigger a new run indefinitely. The workflow uses `paths-ignore` on exactly those files — so auto-improve commits are structurally excluded, not dependent on a magic string in the commit message. This also keeps push triggers reliable: `[skip ci]` in recent commit history can cause GitHub Actions to de-prioritise subsequent push triggers on the branch.
+The pipeline consumes real LT quota (KaneAI sessions, HE VMs, Claude API tokens) on every run. A push trigger would fire on every commit — including auto-improve commits, README edits, and dependency bumps — burning quota unnecessarily. Manual dispatch gives explicit control over when the full pipeline runs, and the required inputs (`tm_project_id`, `tm_environment_id`) ensure runs are always attributed to the right project.
 
 ### Why is the objective format strictly enforced?
 
@@ -291,16 +292,14 @@ Go to **Settings → Secrets and variables → Actions → Secrets**
 
 These three are the only required configuration. Without them the pipeline cannot authenticate.
 
-### 2. GitHub Variables *(optional — has working defaults)*
+### 2. Required workflow inputs *(must provide on every run)*
 
-Go to **Settings → Secrets and variables → Actions → Variables**
+These are entered at **Actions → Agentic SDLC → Run workflow** — the pipeline refuses to start without them.
 
-| Variable | Description | How to find it |
-|----------|-------------|----------------|
-| `TM_PROJECT_ID` | Test Manager project ID (ULID) | KaneAI → your project → URL contains the project ID |
-| `TM_ENVIRONMENT_ID` | Test environment ID (integer) | Test Manager → Environments → create or select → ID in API response |
-
-If not set, the pipeline falls back to the default saucedemo project and environment — it still runs end-to-end and produces real results, so you can see the full flow working immediately without any project configuration.
+| Input | Description | How to find it |
+|-------|-------------|----------------|
+| `tm_project_id` | Test Manager project ID (ULID) | KaneAI → your project → copy from URL |
+| `tm_environment_id` | Test environment ID (integer) | Test Manager → Environments → your environment ID |
 
 ### 3. Configure kane-cli for your project
 

@@ -20,12 +20,12 @@ on:
         type: choice
         options: ["1", "2", "3"]
       tm_project_id:
-        description: "TM Project ID (ULID). Leave blank to use repo variable TM_PROJECT_ID or default."
-        required: false
+        description: "TM Project ID (ULID) — find it in KaneAI → your project → URL. e.g. 01KVXJ82AKT83GWJNFZTQVMNRQ"
+        required: true
         type: string
       tm_environment_id:
-        description: "TM Environment ID (integer). Leave blank to use repo variable TM_ENVIRONMENT_ID or default."
-        required: false
+        description: "TM Environment ID (integer) — find it in Test Manager → Environments → your environment ID. e.g. 282603"
+        required: true
         type: string
 
 env:
@@ -39,6 +39,17 @@ jobs:
       contents: write   # needed for auto-improve git commit + push
 
     steps:
+      - name: Validate required inputs
+        run: |
+          if [ -z "${{ inputs.tm_project_id }}" ]; then
+            echo "ERROR: tm_project_id is required. Go to Actions → Run workflow and enter your TM Project ID (ULID)."
+            exit 1
+          fi
+          if [ -z "${{ inputs.tm_environment_id }}" ]; then
+            echo "ERROR: tm_environment_id is required. Go to Actions → Run workflow and enter your TM Environment ID (integer)."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
