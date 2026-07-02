@@ -692,18 +692,28 @@ def phase3_trigger_he(test_cases):
     print(f"       TM Report  : {tm_report_url}")
 
     # Step 3b: Link instances with environment
+    # environment_id MUST be at the top level of the PUT body (run level).
+    # Per-instance placement is silently ignored by the TM backend, leaving the
+    # run with no environment config → any subsequent call panics with
+    # "index out of range [0] with length 0" → HE trigger 500.
     print(f"  [3b] Linking {len(instances)} instance(s) with environment {ENVIRONMENT_ID}...")
-    instances_with_env = [{**inst, "environment_id": ENVIRONMENT_ID} for inst in instances]
-    link_resp = tm_request("PUT", f"/test-run/{test_run_id}", {
+    put_payload = {
         "id":                  test_run_id,
         "title":               BUILD_NAME,
         "project_id":          PROJECT_ID,
         "objective":           "Agentic SDLC pitch — KaneAI Flow 2 end-to-end pipeline",
         "is_auteur_generated": True,
         "tags":                ["agentic-sdlc", "kaneai", "flow2"],
-        "test_run_instances":  instances_with_env,
-    })
-    print(f"       {link_resp.get('message', link_resp)}")
+        "environment_id":      ENVIRONMENT_ID,
+        "test_run_instances":  instances,
+    }
+    print(f"       PUT /test-run/{test_run_id} — environment_id={ENVIRONMENT_ID} (top-level), instances={len(instances)}")
+    link_resp = tm_request("PUT", f"/test-run/{test_run_id}", put_payload)
+    link_msg = link_resp.get("message", "")
+    link_success = link_resp.get("success", link_resp.get("status", ""))
+    print(f"       Response: success={link_success!r} message={link_msg!r}")
+    if not link_msg and not link_success:
+        print(f"       Full response: {link_resp}")
 
     # Step 3c: Validate environment then trigger HyperExecute
     print(f"  [3c] Validating environment {ENVIRONMENT_ID}...")
