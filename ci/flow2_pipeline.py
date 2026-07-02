@@ -659,8 +659,10 @@ def phase3_trigger_he(test_cases):
     })
     print(f"       {link_resp.get('message', link_resp)}")
 
-    # Step 3c: Trigger HyperExecute (retry up to 3× on 5xx — TM backend can panic if
-    # code-generation for newly authored test cases is still indexing)
+    # Step 3c: Trigger HyperExecute
+    # On fresh projects (fork users), TM backend can panic ("index out of range [0]")
+    # because newly authored test case scripts are still being indexed. Retry up to 5×
+    # with 30s gaps — existing users succeed on attempt 1 with no delay.
     print("  [3c] Triggering HyperExecute...")
     he_payload = {
         "test_run_id":      test_run_id,
@@ -673,14 +675,15 @@ def phase3_trigger_he(test_cases):
         "network_logs":     True,
     }
     he_resp = {}
-    for _attempt in range(1, 4):
+    _MAX_HE_ATTEMPTS = 5
+    for _attempt in range(1, _MAX_HE_ATTEMPTS + 1):
         try:
             he_resp = api_request("POST", HE_API, he_payload)
             break
         except urllib.error.HTTPError as exc:
-            if exc.code >= 500 and _attempt < 3:
-                print(f"  [3c] HE trigger HTTP {exc.code} (attempt {_attempt}/3) — waiting 20s before retry...")
-                time.sleep(20)
+            if exc.code >= 500 and _attempt < _MAX_HE_ATTEMPTS:
+                print(f"  [3c] HE trigger HTTP {exc.code} (attempt {_attempt}/{_MAX_HE_ATTEMPTS}) — waiting 30s for scripts to index...")
+                time.sleep(30)
             else:
                 raise
 
