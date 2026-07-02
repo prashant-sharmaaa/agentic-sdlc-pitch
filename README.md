@@ -122,7 +122,7 @@ Browser tests on real infrastructure can be flaky for reasons unrelated to the t
 
 ### Why manual dispatch only — no push trigger?
 
-The pipeline consumes real LT quota (KaneAI sessions, HE VMs, Claude API tokens) on every run. A push trigger would fire on every commit — including auto-improve commits, README edits, and dependency bumps — burning quota unnecessarily. Manual dispatch gives explicit control over when the full pipeline runs, and the required inputs (`tm_project_id`, `tm_environment_id`) ensure runs are always attributed to the right project.
+The pipeline consumes real LT quota (KaneAI sessions, HE VMs, Claude API tokens) on every run. A push trigger would fire on every commit — including auto-improve commits, README edits, and dependency bumps — burning quota unnecessarily. Manual dispatch gives explicit control over when the full pipeline runs, and the required `tm_project_id` input ensures runs are always attributed to the right project.
 
 ### Why is the objective format strictly enforced?
 
@@ -299,7 +299,7 @@ These are entered at **Actions → Agentic SDLC → Run workflow** — the pipel
 | Input | Required | Description | How to find it |
 |-------|----------|-------------|----------------|
 | `tm_project_id` | ✅ Yes | Test Manager project ID (ULID) | KaneAI → your project → copy from URL |
-| `tm_environment_id` | ✅ Yes | Test environment ID (integer) | Test Manager → Environments → your environment ID |
+| `tm_environment_id` | ⚠️ Optional | Test environment ID (integer). Leave blank on first run — pipeline auto-creates a compatible env and reuses it on subsequent runs. | Test Manager → Environments → your environment ID |
 | `kane_folder_id` | ⚠️ Recommended | KaneAI folder ID (ULID) inside your project | KaneAI → your project → folder → copy from URL |
 
 > **Why `kane_folder_id` matters:** kane-cli saves authored test cases to a specific folder. If you set `tm_project_id` but don't set `kane_folder_id`, kane-cli falls back to its auto-selected folder which may belong to a **different project** — test cases end up in the wrong place and Phase 2 finds nothing.
@@ -389,4 +389,6 @@ python3 ci/flow2_pipeline.py --skip-phase1
 | Auto-improve commit | `paths-ignore` on `ci/objectives.json` + `requirements/analyzed_requirements.json` prevents re-triggering |
 | Custom URL run | Objectives generated for that URL; never overwrites default saucedemo objectives |
 | First run (no history) | Cross-run heal skips gracefully — nothing to heal |
-| Private Google Doc URL | Download fails — make the doc public ("Anyone with link can view") 
+| No `tm_environment_id` provided | Pipeline checks `ci/.working_env_id` from previous run; creates a new compatible env if none found and saves the id for future runs |
+| Bad `tm_environment_id` (KaneAI UI-created, non-HE-compatible) | Pipeline detects incompatible env, creates a working replacement, and persists the new id to `ci/.working_env_id` |
+| Private Google Doc URL | Download fails — make the doc public ("Anyone with link can view") |
