@@ -166,26 +166,6 @@ def tm_request(method, path, payload=None):
     return api_request(method, f"{TM_API}{path}", payload)
 
 
-def _discover_environment_id() -> int:
-    """
-    Fetch environments for PROJECT_ID from TM API and return the first one's ID.
-    Returns 0 if none found so the caller can emit a helpful error.
-    """
-    for path in (f"/projects/{PROJECT_ID}/environments", f"/environments?project_id={PROJECT_ID}"):
-        try:
-            data = tm_request("GET", path)
-            envs = data.get("data") or data.get("environments") or data.get("results") or []
-            if isinstance(envs, list) and envs:
-                env    = envs[0]
-                env_id = env.get("id") or env.get("environment_id")
-                if env_id:
-                    print(f"[config] Auto-discovered environment '{env.get('name', env_id)}' (ID={env_id})")
-                    return int(env_id)
-        except Exception:
-            pass
-    return 0
-
-
 def run_kane(sc):
     """Run a single kane-cli objective. Streams NDJSON events in real-time. Returns (status, session_id, failure_detail)."""
     import threading
